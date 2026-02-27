@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A GitHub user.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
     /// GitHub login (username).
     pub login: String,
@@ -111,6 +111,18 @@ pub struct PullRequest {
     pub number: u64,
     /// PR title.
     pub title: String,
+    /// Whether this PR is a draft.
+    #[serde(default)]
+    pub draft: bool,
+    /// PR author (includes avatar URL for display).
+    #[serde(default)]
+    pub author: User,
+    /// Assigned users (includes avatar URLs for display).
+    #[serde(default)]
+    pub assignees: Vec<User>,
+    /// Users requested to review this PR (drives Code Review column).
+    #[serde(default)]
+    pub requested_reviewers: Vec<User>,
     /// Reviews submitted on this PR.
     pub reviews: Vec<Review>,
     /// Aggregated CI status.

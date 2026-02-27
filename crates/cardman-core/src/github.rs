@@ -145,6 +145,17 @@ struct GhPullRequest {
     state: String,
     /// `null` for open/closed PRs, ISO-8601 timestamp for merged PRs.
     merged_at: Option<String>,
+    /// Whether this is a draft PR.
+    #[serde(default)]
+    draft: bool,
+    /// PR author.
+    user: GhUser,
+    /// Assigned users.
+    #[serde(default)]
+    assignees: Vec<GhUser>,
+    /// Users requested to review.
+    #[serde(default)]
+    requested_reviewers: Vec<GhUser>,
     head: GhPrHead,
     labels: Vec<GhLabel>,
     updated_at: String,
@@ -408,6 +419,30 @@ impl RestClient {
             .collect())
     }
 
+    /// List organization members and outside collaborators.
+    ///
+    /// Fetches both `/orgs/{org}/members` and `/orgs/{org}/outside_collaborators`,
+    /// deduplicates by login, and returns the combined set.
+    pub async fn list_members(&self, org: &str) -> Result<Vec<User>, GitHubError> {
+        let members: Vec<GhUser> = self
+            .paginate(&format!("/orgs/{org}/members"))
+            .await
+            .unwrap_or_default();
+        let collaborators: Vec<GhUser> = self
+            .paginate(&format!("/orgs/{org}/outside_collaborators"))
+            .await
+            .unwrap_or_default();
+
+        let mut all: Vec<User> = members.into_iter().map(Into::into).collect();
+        for c in collaborators {
+            let user: User = c.into();
+            if !all.iter().any(|m| m.login == user.login) {
+                all.push(user);
+            }
+        }
+        Ok(all)
+    }
+
     /// List open issues for a repository (excludes pull requests).
     ///
     /// When `since` is `Some`, fetches only open issues updated after that
@@ -475,7 +510,13 @@ impl RestClient {
     ///
     /// When `since` is `Some`, paginates `state=open` sorted by updated desc
     /// and stops at the cutoff (incremental). When `None`, fetches all open
-    /// PRs (full pagination). Includes reviews and CI status.
+    /// PRs (full pagination).
+    ///
+    /// Fetch logic per PR:
+    /// - Draft → skip reviews & CI
+    /// - No `requested_reviewers` → skip reviews & CI
+    /// - Has reviewers → fetch reviews → `changes_requested` → skip CI
+    ///   → otherwise → fetch CI
     pub async fn list_open_prs(
         &self,
         owner: &str,
@@ -498,22 +539,41 @@ impl RestClient {
 
         let mut prs = Vec::with_capacity(items.len());
         for item in items {
-            let r = self
-                .get_reviews(owner, repo, item.number)
-                .await
-                .unwrap_or_default();
-            // Only fetch CI when reviewers exist (saves one API call per PR)
-            let ci = if r.is_empty() {
-                CiStatus::Pending
+            let requested: Vec<User> = item
+                .requested_reviewers
+                .into_iter()
+                .map(Into::into)
+                .collect();
+
+            // Draft or no requested reviewers → skip reviews & CI
+            let (reviews, ci) = if item.draft || requested.is_empty() {
+                (Vec::new(), CiStatus::Pending)
             } else {
-                self.get_ci_status(owner, repo, &item.head.branch_ref)
+                let r = self
+                    .get_reviews(owner, repo, item.number)
                     .await
-                    .unwrap_or(CiStatus::Pending)
+                    .unwrap_or_default();
+                // Skip CI when changes requested (PR needs rework)
+                let has_changes_requested =
+                    r.iter().any(|rv| rv.state == ReviewState::ChangesRequested);
+                let ci = if has_changes_requested {
+                    CiStatus::Pending
+                } else {
+                    self.get_ci_status(owner, repo, &item.head.branch_ref)
+                        .await
+                        .unwrap_or(CiStatus::Pending)
+                };
+                (r, ci)
             };
+
             prs.push(PullRequest {
                 number: item.number,
                 title: item.title,
-                reviews: r,
+                draft: item.draft,
+                author: item.user.into(),
+                assignees: item.assignees.into_iter().map(Into::into).collect(),
+                requested_reviewers: requested,
+                reviews,
                 ci_status: ci,
                 merged: false,
                 closed: false,
@@ -558,6 +618,10 @@ impl RestClient {
                 PullRequest {
                     number: item.number,
                     title: item.title,
+                    draft: false,
+                    author: item.user.into(),
+                    assignees: item.assignees.into_iter().map(Into::into).collect(),
+                    requested_reviewers: Vec::new(),
                     reviews: Vec::new(),
                     ci_status: CiStatus::Pending,
                     merged,
