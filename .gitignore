@@ -1,0 +1,10 @@
+# Rust
+/target/
+Cargo.lock
+
+# Dioxus
+.dioxus/
+dist/
+
+# Extension build
+crates/cardman-extension/pkg/
