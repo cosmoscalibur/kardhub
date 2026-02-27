@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/cardman-core", "crates/cardman-app", "crates/cardman-extension"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+cardman-core = { path = "crates/cardman-core" }
