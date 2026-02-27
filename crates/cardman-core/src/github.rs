@@ -364,14 +364,30 @@ impl RestClient {
             .collect())
     }
 
-    /// List open issues for a repository (excludes pull requests).
+    /// List issues for a repository (excludes pull requests).
+    ///
+    /// Fetches all open issues (fully paginated) plus the most recent
+    /// page of closed issues (sorted by updated date, up to 100).
     pub async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<Issue>, GitHubError> {
-        let items: Vec<GhIssue> = self
+        // All open issues — full pagination
+        let open: Vec<GhIssue> = self
             .paginate(&format!("/repos/{owner}/{repo}/issues?state=open"))
             .await?;
-        // GitHub's issues endpoint also returns PRs; filter them out
-        Ok(items
+
+        // Recent closed issues — single page sorted by most recently updated
+        let closed_resp = self
+            .get(&format!(
+                "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&per_page=100"
+            ))
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        let closed: Vec<GhIssue> = self.handle_response(closed_resp).await?;
+
+        // Merge and filter out PRs
+        Ok(open
             .into_iter()
+            .chain(closed)
             .filter(|i| i.pull_request.is_none())
             .map(Into::into)
             .collect())

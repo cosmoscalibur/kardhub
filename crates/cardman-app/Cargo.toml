@@ -6,6 +6,8 @@ license.workspace = true
 description = "Dioxus desktop application for Cardman."
 
 [dependencies]
-dioxus = { version = "0.6", features = ["desktop", "router"] }
+dioxus = { version = "0.7", features = ["desktop", "router"] }
 cardman-core.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["time"] }

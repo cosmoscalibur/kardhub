@@ -34,6 +34,7 @@ enum ColumnKind {
     Icebox,
     Prebacklog,
     Backlog,
+    Failed,
     InProgress,
     CodeReview,
     QaBacklog,
@@ -50,13 +51,14 @@ impl ColumnKind {
             Self::Icebox => ("Icebox", "🧊", 0),
             Self::Prebacklog => ("Prebacklog", "⏳", 1),
             Self::Backlog => ("Backlog", "📥", 2),
-            Self::InProgress => ("In Progress", "🚧", 3),
-            Self::CodeReview => ("Code review", "👀", 4),
-            Self::QaBacklog => ("QA Backlog", "⏳", 5),
-            Self::QaReview => ("QA Review", "🔍", 6),
-            Self::ReadyForStg => ("Ready for STG", "☑️", 7),
-            Self::ReadyForDeploy => ("Ready for deploy", "✅", 8),
-            Self::InRelease => ("In Release", "📦", 9),
+            Self::Failed => ("Failed", "❌", 3),
+            Self::InProgress => ("In Progress", "🚧", 4),
+            Self::CodeReview => ("Code review", "👀", 5),
+            Self::QaBacklog => ("QA Backlog", "⏳", 6),
+            Self::QaReview => ("QA Review", "🔍", 7),
+            Self::ReadyForStg => ("Ready for STG", "☑️", 8),
+            Self::ReadyForDeploy => ("Ready for deploy", "✅", 9),
+            Self::InRelease => ("In Release", "📦", 10),
         };
         Column {
             name: name.to_string(),
@@ -76,13 +78,29 @@ fn extract_priority(labels: &[Label]) -> Option<Priority> {
 
 /// Determine the column for an issue (no associated PR).
 fn map_issue(issue: &Issue) -> ColumnKind {
+    // QA-OK label → ☑️ Ready for STG
+    let has_qa_ok = issue
+        .labels
+        .iter()
+        .any(|l| l.name.eq_ignore_ascii_case("QA-OK"));
+    if has_qa_ok {
+        return ColumnKind::ReadyForStg;
+    }
+
+    // QA-Failed label → ❌ Failed
+    let has_qa_failed = issue
+        .labels
+        .iter()
+        .any(|l| l.name.eq_ignore_ascii_case("QA-Failed"));
+    if has_qa_failed {
+        return ColumnKind::Failed;
+    }
+
     let priority = extract_priority(&issue.labels);
     match priority.map(|p| p.0) {
         Some(6) => ColumnKind::Icebox,
         Some(1..=3) => ColumnKind::Backlog,
         Some(4..=5) | None => ColumnKind::Prebacklog,
-        // Priority values outside 1..=6 are prevented by Priority::from_label,
-        // but the match must be exhaustive.
         Some(_) => ColumnKind::Prebacklog,
     }
 }
@@ -108,6 +126,15 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
         return ColumnKind::ReadyForDeploy;
     }
 
+    // Label "QA-OK" → ☑️ Ready for STG
+    let has_qa_ok = pr
+        .labels
+        .iter()
+        .any(|l| l.name.eq_ignore_ascii_case("QA-OK"));
+    if has_qa_ok {
+        return ColumnKind::ReadyForStg;
+    }
+
     // A QA user approved → ☑️ Ready for STG
     let qa_approved = pr.reviews.iter().any(|r| {
         r.state == ReviewState::Approved
@@ -124,6 +151,15 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
     let has_qa_label = pr.labels.iter().any(|l| l.name.eq_ignore_ascii_case("QA"));
     if has_qa_label {
         return ColumnKind::QaReview;
+    }
+
+    // Label "QA-Failed" → ❌ Failed
+    let has_qa_failed = pr
+        .labels
+        .iter()
+        .any(|l| l.name.eq_ignore_ascii_case("QA-Failed"));
+    if has_qa_failed {
+        return ColumnKind::Failed;
     }
 
     let approval_count = pr
@@ -399,7 +435,40 @@ mod tests {
             },
         ];
         let card = map_card(CardSource::PullRequest(pr), &default_config());
-        // Pending review blocks both Code Review and QA Backlog → In Progress
         assert_eq!(card.column.name, "In Progress");
+    }
+
+    // ── QA-Failed / QA-OK rules ──────────────────────────────────────
+
+    #[test]
+    fn issue_qa_failed_maps_to_failed() {
+        let mut issue = base_issue();
+        issue.labels = vec![label("QA-Failed")];
+        let card = map_card(CardSource::Issue(issue), &default_config());
+        assert_eq!(card.column.name, "Failed");
+    }
+
+    #[test]
+    fn issue_qa_ok_maps_to_ready_for_stg() {
+        let mut issue = base_issue();
+        issue.labels = vec![label("QA-OK")];
+        let card = map_card(CardSource::Issue(issue), &default_config());
+        assert_eq!(card.column.name, "Ready for STG");
+    }
+
+    #[test]
+    fn pr_qa_failed_label_maps_to_failed() {
+        let mut pr = base_pr();
+        pr.labels = vec![label("QA-Failed")];
+        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        assert_eq!(card.column.name, "Failed");
+    }
+
+    #[test]
+    fn pr_qa_ok_label_maps_to_ready_for_stg() {
+        let mut pr = base_pr();
+        pr.labels = vec![label("QA-OK")];
+        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        assert_eq!(card.column.name, "Ready for STG");
     }
 }
