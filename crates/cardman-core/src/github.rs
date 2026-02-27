@@ -113,6 +113,8 @@ struct GhIssue {
     labels: Vec<GhLabel>,
     assignees: Vec<GhUser>,
     state: String,
+    #[allow(dead_code)]
+    updated_at: String,
     /// PR field presence indicates this is actually a PR, not an issue.
     pull_request: Option<serde_json::Value>,
 }
@@ -139,9 +141,13 @@ impl From<GhIssue> for Issue {
 struct GhPullRequest {
     number: u64,
     title: String,
-    merged: bool,
+    #[allow(dead_code)]
+    state: String,
+    /// `null` for open/closed PRs, ISO-8601 timestamp for merged PRs.
+    merged_at: Option<String>,
     head: GhPrHead,
     labels: Vec<GhLabel>,
+    updated_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -324,6 +330,44 @@ impl RestClient {
         Ok(all)
     }
 
+    /// Paginate a PR endpoint until items are older than `cutoff` (ISO-8601).
+    ///
+    /// Expects the endpoint to return items sorted by `updated` desc.
+    async fn paginate_until(
+        &self,
+        path: &str,
+        cutoff: &str,
+    ) -> Result<Vec<GhPullRequest>, GitHubError> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let separator = if path.contains('?') { '&' } else { '?' };
+            let url = format!("{path}{separator}per_page=100&page={page}");
+            let resp = self
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| GitHubError::Http(e.to_string()))?;
+            let items: Vec<GhPullRequest> = self.handle_response(resp).await?;
+            if items.is_empty() {
+                break;
+            }
+            let mut hit_cutoff = false;
+            for item in items {
+                if item.updated_at.as_str() < cutoff {
+                    hit_cutoff = true;
+                    break;
+                }
+                all.push(item);
+            }
+            if hit_cutoff {
+                break;
+            }
+            page += 1;
+        }
+        Ok(all)
+    }
+
     // ── Public API ───────────────────────────────────────────────────
 
     /// Get the authenticated user.
@@ -364,62 +408,161 @@ impl RestClient {
             .collect())
     }
 
-    /// List issues for a repository (excludes pull requests).
+    /// List open issues for a repository (excludes pull requests).
     ///
-    /// Fetches all open issues (fully paginated) plus the most recent
-    /// page of closed issues (sorted by updated date, up to 100).
-    pub async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<Issue>, GitHubError> {
-        // All open issues — full pagination
-        let open: Vec<GhIssue> = self
-            .paginate(&format!("/repos/{owner}/{repo}/issues?state=open"))
-            .await?;
+    /// When `since` is `Some`, fetches only open issues updated after that
+    /// timestamp (incremental). When `None`, fetches all open issues (full).
+    pub async fn list_open_issues(
+        &self,
+        owner: &str,
+        repo: &str,
+        since: Option<&str>,
+    ) -> Result<Vec<Issue>, GitHubError> {
+        let path = match since {
+            Some(ts) => format!(
+                "/repos/{owner}/{repo}/issues?state=open&sort=updated&direction=desc&since={ts}"
+            ),
+            None => format!("/repos/{owner}/{repo}/issues?state=open"),
+        };
+        let items: Vec<GhIssue> = self.paginate(&path).await?;
 
-        // Recent closed issues — single page sorted by most recently updated
-        let closed_resp = self
-            .get(&format!(
-                "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&per_page=100"
-            ))
-            .send()
-            .await
-            .map_err(|e| GitHubError::Http(e.to_string()))?;
-        let closed: Vec<GhIssue> = self.handle_response(closed_resp).await?;
-
-        // Merge and filter out PRs
-        Ok(open
+        Ok(items
             .into_iter()
-            .chain(closed)
+            .filter(|i| i.pull_request.is_none())
+            .map(Into::into)
+            .collect())
+    }
+
+    /// List closed issues for a repository (excludes pull requests).
+    ///
+    /// When `since` is `Some`, fetches closed issues updated after that
+    /// timestamp (incremental). When `None`, fetches a single page of 100
+    /// most recently updated closed issues (first sync).
+    pub async fn list_closed_issues(
+        &self,
+        owner: &str,
+        repo: &str,
+        since: Option<&str>,
+    ) -> Result<Vec<Issue>, GitHubError> {
+        let items: Vec<GhIssue> = match since {
+            Some(ts) => {
+                let path = format!(
+                    "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&since={ts}"
+                );
+                self.paginate(&path).await?
+            }
+            None => {
+                // First sync: single page of 100
+                let resp = self
+                    .get(&format!(
+                        "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&per_page=100"
+                    ))
+                    .send()
+                    .await
+                    .map_err(|e| GitHubError::Http(e.to_string()))?;
+                self.handle_response(resp).await?
+            }
+        };
+
+        Ok(items
+            .into_iter()
             .filter(|i| i.pull_request.is_none())
             .map(Into::into)
             .collect())
     }
 
     /// List open pull requests for a repository.
-    pub async fn list_pull_requests(
+    ///
+    /// When `since` is `Some`, paginates `state=open` sorted by updated desc
+    /// and stops at the cutoff (incremental). When `None`, fetches all open
+    /// PRs (full pagination). Includes reviews and CI status.
+    pub async fn list_open_prs(
         &self,
         owner: &str,
         repo: &str,
+        since: Option<&str>,
     ) -> Result<Vec<PullRequest>, GitHubError> {
-        let items: Vec<GhPullRequest> = self
-            .paginate(&format!("/repos/{owner}/{repo}/pulls?state=open"))
-            .await?;
+        let items: Vec<GhPullRequest> = match since {
+            Some(ts) => {
+                self.paginate_until(
+                    &format!("/repos/{owner}/{repo}/pulls?state=open&sort=updated&direction=desc"),
+                    ts,
+                )
+                .await?
+            }
+            None => {
+                self.paginate(&format!("/repos/{owner}/{repo}/pulls?state=open"))
+                    .await?
+            }
+        };
 
         let mut prs = Vec::with_capacity(items.len());
         for item in items {
-            let reviews = self.get_reviews(owner, repo, item.number).await?;
-            let ci_status = self
+            let r = self
+                .get_reviews(owner, repo, item.number)
+                .await
+                .unwrap_or_default();
+            let ci = self
                 .get_ci_status(owner, repo, &item.head.branch_ref)
-                .await?;
+                .await
+                .unwrap_or(CiStatus::Pending);
             prs.push(PullRequest {
                 number: item.number,
                 title: item.title,
-                reviews,
-                ci_status,
-                merged: item.merged,
+                reviews: r,
+                ci_status: ci,
+                merged: false,
+                closed: false,
                 branch: item.head.branch_ref,
                 labels: item.labels.into_iter().map(Into::into).collect(),
             });
         }
         Ok(prs)
+    }
+
+    /// List closed (merged + closed-not-merged) pull requests.
+    ///
+    /// When `since` is `Some`, paginates `state=closed` sorted by updated
+    /// desc and stops at the cutoff (incremental). When `None`, fetches all
+    /// closed PRs (full pagination, first sync). No reviews/CI needed.
+    pub async fn list_closed_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+        since: Option<&str>,
+    ) -> Result<Vec<PullRequest>, GitHubError> {
+        let items: Vec<GhPullRequest> = match since {
+            Some(ts) => {
+                self.paginate_until(
+                    &format!(
+                        "/repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc"
+                    ),
+                    ts,
+                )
+                .await?
+            }
+            None => {
+                self.paginate(&format!("/repos/{owner}/{repo}/pulls?state=closed"))
+                    .await?
+            }
+        };
+
+        Ok(items
+            .into_iter()
+            .map(|item| {
+                let merged = item.merged_at.is_some();
+                PullRequest {
+                    number: item.number,
+                    title: item.title,
+                    reviews: Vec::new(),
+                    ci_status: CiStatus::Pending,
+                    merged,
+                    closed: !merged,
+                    branch: item.head.branch_ref,
+                    labels: item.labels.into_iter().map(Into::into).collect(),
+                }
+            })
+            .collect())
     }
 
     /// Get reviews for a pull request.
@@ -558,6 +701,7 @@ mod tests {
             labels: vec![],
             assignees: vec![],
             state: "open".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
             pull_request: Some(serde_json::json!({})),
         };
         // pull_request field is present, so this should be filtered out when listing issues

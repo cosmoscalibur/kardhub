@@ -5,7 +5,8 @@
 //! the Cardman spec — later rules override earlier ones when conditions match.
 
 use crate::models::{
-    Card, CardSource, CiStatus, Column, Issue, Label, Priority, PullRequest, ReviewState,
+    Card, CardSource, CiStatus, Column, Issue, IssueState, Label, Priority, PullRequest,
+    ReviewState,
 };
 
 /// Configuration for the mapping engine.
@@ -42,6 +43,7 @@ enum ColumnKind {
     ReadyForStg,
     ReadyForDeploy,
     InRelease,
+    Closed,
 }
 
 impl ColumnKind {
@@ -59,6 +61,7 @@ impl ColumnKind {
             Self::ReadyForStg => ("Ready for STG", "☑️", 8),
             Self::ReadyForDeploy => ("Ready for deploy", "✅", 9),
             Self::InRelease => ("In Release", "📦", 10),
+            Self::Closed => ("Closed", "🚪", 11),
         };
         Column {
             name: name.to_string(),
@@ -78,6 +81,11 @@ fn extract_priority(labels: &[Label]) -> Option<Priority> {
 
 /// Determine the column for an issue (no associated PR).
 fn map_issue(issue: &Issue) -> ColumnKind {
+    // Closed issues → 🚪 Closed
+    if issue.state == IssueState::Closed {
+        return ColumnKind::Closed;
+    }
+
     // QA-OK label → ☑️ Ready for STG
     let has_qa_ok = issue
         .labels
@@ -124,6 +132,11 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
     // Merged to default branch → ✅ Ready for deploy
     if pr.merged {
         return ColumnKind::ReadyForDeploy;
+    }
+
+    // Closed without merging → 🚪 Closed
+    if pr.closed {
+        return ColumnKind::Closed;
     }
 
     // Label "QA-OK" → ☑️ Ready for STG
@@ -243,6 +256,7 @@ mod tests {
             reviews: vec![],
             ci_status: CiStatus::Success,
             merged: false,
+            closed: false,
             branch: "feature/test".to_string(),
             labels: vec![],
         }

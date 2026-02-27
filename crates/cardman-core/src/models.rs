@@ -117,6 +117,9 @@ pub struct PullRequest {
     pub ci_status: CiStatus,
     /// Whether this PR has been merged into the default branch.
     pub merged: bool,
+    /// Whether this PR was closed without merging.
+    #[serde(default)]
+    pub closed: bool,
     /// Head branch name.
     pub branch: String,
     /// Labels attached to this PR.
