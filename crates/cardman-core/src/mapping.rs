@@ -139,6 +139,15 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
         return ColumnKind::Closed;
     }
 
+    // Draft with requested reviewers → ❌ Failed (should not request review on draft)
+    // Draft without reviewers → 🚧 In Progress
+    if pr.draft {
+        if pr.requested_reviewers.is_empty() {
+            return ColumnKind::InProgress;
+        }
+        return ColumnKind::Failed;
+    }
+
     // Label "QA-OK" → ☑️ Ready for STG
     let has_qa_ok = pr
         .labels
@@ -175,27 +184,33 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
         return ColumnKind::Failed;
     }
 
+    // Review with changes requested → ❌ Failed
+    let has_changes_requested = pr
+        .reviews
+        .iter()
+        .any(|r| r.state == ReviewState::ChangesRequested);
+    if has_changes_requested {
+        return ColumnKind::Failed;
+    }
+
     let approval_count = pr
         .reviews
         .iter()
         .filter(|r| r.state == ReviewState::Approved)
         .count();
     let has_failed_ci = pr.ci_status == CiStatus::Failure;
-    let has_pending_review = pr.reviews.iter().any(|r| r.state == ReviewState::Pending);
-    let has_reviewers = !pr.reviews.is_empty();
 
-    // N approved reviewers, no failed CI, no pending review → ⏳ QA Backlog
-    if approval_count >= config.required_approvals as usize && !has_failed_ci && !has_pending_review
-    {
+    // N approved reviewers + no failed CI → ⏳ QA Backlog
+    if approval_count >= config.required_approvals as usize && !has_failed_ci {
         return ColumnKind::QaBacklog;
     }
 
-    // Has reviewers, no failed CI, no pending review → 👀 Code review
-    if has_reviewers && !has_failed_ci && !has_pending_review {
+    // Has requested reviewers + no failed CI → 👀 Code review
+    if !pr.requested_reviewers.is_empty() && !has_failed_ci {
         return ColumnKind::CodeReview;
     }
 
-    // Has PR (default for any open PR) → 🚧 In Progress
+    // Default for any open PR → 🚧 In Progress
     ColumnKind::InProgress
 }
 
@@ -253,6 +268,10 @@ mod tests {
         PullRequest {
             number: 10,
             title: "Test PR".to_string(),
+            draft: false,
+            author: user("author"),
+            assignees: vec![],
+            requested_reviewers: vec![],
             reviews: vec![],
             ci_status: CiStatus::Success,
             merged: false,
@@ -344,10 +363,7 @@ mod tests {
     #[test]
     fn pr_with_reviewers_no_failure_maps_to_code_review() {
         let mut pr = base_pr();
-        pr.reviews = vec![Review {
-            user: user("reviewer1"),
-            state: ReviewState::Commented,
-        }];
+        pr.requested_reviewers = vec![user("reviewer1")];
         let card = map_card(CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Code review");
     }
@@ -356,10 +372,7 @@ mod tests {
     fn pr_with_failed_ci_stays_in_progress() {
         let mut pr = base_pr();
         pr.ci_status = CiStatus::Failure;
-        pr.reviews = vec![Review {
-            user: user("reviewer1"),
-            state: ReviewState::Commented,
-        }];
+        pr.requested_reviewers = vec![user("reviewer1")];
         let card = map_card(CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Progress");
     }
@@ -484,5 +497,42 @@ mod tests {
         pr.labels = vec![label("QA-OK")];
         let card = map_card(CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Ready for STG");
+    }
+
+    #[test]
+    fn pr_draft_without_reviewers_stays_in_progress() {
+        let mut pr = base_pr();
+        pr.draft = true;
+        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        assert_eq!(card.column.name, "In Progress");
+    }
+
+    #[test]
+    fn pr_draft_with_reviewers_maps_to_failed() {
+        let mut pr = base_pr();
+        pr.draft = true;
+        pr.requested_reviewers = vec![user("reviewer1")];
+        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        assert_eq!(card.column.name, "Failed");
+    }
+
+    #[test]
+    fn pr_changes_requested_maps_to_failed() {
+        let mut pr = base_pr();
+        pr.requested_reviewers = vec![user("reviewer1")];
+        pr.reviews = vec![Review {
+            user: user("reviewer1"),
+            state: ReviewState::ChangesRequested,
+        }];
+        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        assert_eq!(card.column.name, "Failed");
+    }
+
+    #[test]
+    fn closed_issue_maps_to_closed() {
+        let mut issue = base_issue();
+        issue.state = IssueState::Closed;
+        let card = map_card(CardSource::Issue(issue), &default_config());
+        assert_eq!(card.column.name, "Closed");
     }
 }
