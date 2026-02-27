@@ -261,6 +261,29 @@ select {
   text-align: center;
 }
 
+.repo-checkbox {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.repo-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-badge {
+  font-size: 10px;
+  background: var(--accent-muted);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
 .sidebar-footer {
   padding: 8px;
   border-top: 1px solid var(--border-subtle);
@@ -270,41 +293,59 @@ select {
 .source-selector {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   padding: 4px 8px 8px;
 }
 
-.source-selector-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  padding: 4px 8px;
-  margin-bottom: 2px;
-}
-
-.source-selector button {
+.source-toggle {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 5px 8px;
+  background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-secondary);
-  transition: background var(--transition), color var(--transition);
-  text-align: left;
+  overflow: hidden;
 }
 
-.source-selector button.active {
+.source-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  transition: background var(--transition), color var(--transition);
+  border-radius: 0;
+}
+
+.source-btn.active {
   background: var(--accent-muted);
   color: var(--accent);
 }
 
-.source-selector button:not(.active):hover {
+.source-btn:not(.active):hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.source-org-select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  appearance: auto;
+  outline: none;
+}
+
+.source-org-select:focus {
+  border-color: var(--accent);
+}
+
+.source-org-select option {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 4px 8px;
 }
 
 .theme-toggle {

@@ -1,8 +1,9 @@
 //! Collapsible sidebar component.
 //!
 //! Top: user avatar + name, collapse toggle.
-//! Middle: personal/org selector, repository list.
-//! Bottom: theme toggle, sign out.
+//! Middle: horizontal Personal/Organization toggle with org dropdown, repo
+//! list with checkboxes sorted by card count then alphabetically.
+//! Bottom: theme toggle, settings, sign out.
 
 use dioxus::prelude::*;
 
@@ -13,6 +14,15 @@ pub enum SourceKind {
     Personal,
     /// Show repositories from an organization.
     Organization(String),
+}
+
+/// A repository entry with its name and cached card count for sorting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoEntry {
+    /// Repository name.
+    pub name: String,
+    /// Number of cached cards (used for sorting, 0 if unknown).
+    pub card_count: usize,
 }
 
 /// Properties for the [`Sidebar`] component.
@@ -32,12 +42,12 @@ pub struct SidebarProps {
     pub orgs: Vec<String>,
     /// Currently selected source kind.
     pub source: SourceKind,
-    /// Repository names available for the current source.
-    pub repos: Vec<String>,
-    /// Currently selected repository index.
-    pub selected_repo: Option<usize>,
-    /// Callback when a repository is selected.
-    pub on_select_repo: EventHandler<usize>,
+    /// Repository entries (name + cached card count).
+    pub repos: Vec<RepoEntry>,
+    /// Indices of currently selected (checked) repositories.
+    pub selected_repos: Vec<usize>,
+    /// Callback when a repository checkbox is toggled.
+    pub on_toggle_repo: EventHandler<usize>,
     /// Callback when the source kind changes.
     pub on_select_source: EventHandler<SourceKind>,
     /// Callback to toggle the sidebar collapsed state.
@@ -74,6 +84,28 @@ pub fn Sidebar(props: SidebarProps) -> Element {
 
     let on_toggle = props.on_toggle;
 
+    // Sort repos: those with card_count > 0 by count desc, then 0-count alphabetically
+    let mut sorted_indices: Vec<usize> = (0..props.repos.len()).collect();
+    sorted_indices.sort_by(|a, b| {
+        let ca = props.repos[*a].card_count;
+        let cb = props.repos[*b].card_count;
+        match (ca > 0, cb > 0) {
+            // Both have counts → higher first
+            (true, true) => cb.cmp(&ca),
+            // Only one has count → it goes first
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            // Neither has count → alphabetical
+            (false, false) => props.repos[*a]
+                .name
+                .to_lowercase()
+                .cmp(&props.repos[*b].name.to_lowercase()),
+        }
+    });
+
+    // Determine if source is Organization (for toggle state)
+    let is_org_mode = matches!(&props.source, SourceKind::Organization(_));
+
     rsx! {
         div { class: "{sidebar_class}",
             // Collapse toggle button
@@ -104,62 +136,72 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                 }
             }
 
-            // Source selector: Personal / Organization
+            // Source selector: horizontal toggle + org dropdown
             if !props.collapsed {
                 div { class: "source-selector",
-                    div { class: "source-selector-title", "Source" }
-                    {
-                        let is_personal = props.source == SourceKind::Personal;
-                        let on_source = props.on_select_source;
-                        rsx! {
-                            button {
-                                class: if is_personal { "active" } else { "" },
-                                onclick: move |_| on_source.call(SourceKind::Personal),
-                                span { class: "icon", "👤" }
-                                "Personal"
-                            }
-                        }
-                    }
-                    for org_name in props.orgs.iter() {
+                    // Horizontal toggle: Personal | Organization
+                    div { class: "source-toggle",
                         {
-                            let is_org = props.source == SourceKind::Organization(org_name.clone());
                             let on_source = props.on_select_source;
-                            let org = org_name.clone();
                             rsx! {
                                 button {
-                                    class: if is_org { "active" } else { "" },
-                                    onclick: move |_| on_source.call(SourceKind::Organization(org.clone())),
-                                    span { class: "icon", "🏢" }
-                                    "{org_name}"
+                                    class: if !is_org_mode { "source-btn active" } else { "source-btn" },
+                                    onclick: move |_| on_source.call(SourceKind::Personal),
+                                    "👤 Personal"
+                                }
+                            }
+                        }
+                        {
+                            let on_source = props.on_select_source;
+                            let orgs = props.orgs.clone();
+                            let current_org = if let SourceKind::Organization(ref o) = props.source {
+                                Some(o.clone())
+                            } else {
+                                None
+                            };
+                            rsx! {
+                                button {
+                                    class: if is_org_mode { "source-btn active" } else { "source-btn" },
+                                    onclick: move |_| {
+                                        // Switch to org mode; use current or first available org
+                                        if let Some(ref org) = current_org {
+                                            on_source.call(SourceKind::Organization(org.clone()));
+                                        } else if let Some(first) = orgs.first() {
+                                            on_source.call(SourceKind::Organization(first.clone()));
+                                        }
+                                    },
+                                    "🏢 Organization"
                                 }
                             }
                         }
                     }
-                }
-            }
-
-            // Repository list
-            div { class: "sidebar-nav",
-                div { class: "sidebar-section",
-                    if !props.collapsed {
-                        div { class: "sidebar-section-title", "Repositories" }
-                    }
-                    for (idx, repo_name) in props.repos.iter().enumerate() {
+                    // Organization dropdown (shown only when org mode is active)
+                    if is_org_mode && !props.orgs.is_empty() {
                         {
-                            let is_active = props.selected_repo == Some(idx);
-                            let item_class = if is_active {
-                                "sidebar-item active"
+                            let on_source = props.on_select_source;
+                            let current_org = if let SourceKind::Organization(ref o) = props.source {
+                                o.clone()
                             } else {
-                                "sidebar-item"
+                                String::new()
                             };
-                            let on_select = props.on_select_repo;
+                            let mut sorted_orgs = props.orgs.clone();
+                            sorted_orgs.sort_by_key(|a| a.to_lowercase());
                             rsx! {
-                                button {
-                                    class: "{item_class}",
-                                    onclick: move |_| on_select.call(idx),
-                                    span { class: "icon", "📁" }
-                                    if !props.collapsed {
-                                        "{repo_name}"
+                                select {
+                                    class: "source-org-select",
+                                    value: "{current_org}",
+                                    onchange: move |evt: Event<FormData>| {
+                                        let org = evt.value();
+                                        if !org.is_empty() {
+                                            on_source.call(SourceKind::Organization(org));
+                                        }
+                                    },
+                                    for org in sorted_orgs.iter() {
+                                        option {
+                                            value: "{org}",
+                                            selected: *org == current_org,
+                                            "{org}"
+                                        }
                                     }
                                 }
                             }
@@ -168,7 +210,46 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                 }
             }
 
-            // Footer: theme toggle + sign out
+            // Repository list with checkboxes
+            div { class: "sidebar-nav",
+                div { class: "sidebar-section",
+                    if !props.collapsed {
+                        div { class: "sidebar-section-title", "Repositories" }
+                    }
+                    for original_idx in sorted_indices.iter() {
+                        {
+                            let idx = *original_idx;
+                            let entry = &props.repos[idx];
+                            let is_checked = props.selected_repos.contains(&idx);
+                            let item_class = if is_checked {
+                                "sidebar-item active"
+                            } else {
+                                "sidebar-item"
+                            };
+                            let on_toggle_repo = props.on_toggle_repo;
+                            let repo_name = entry.name.clone();
+                            let count = entry.card_count;
+                            rsx! {
+                                button {
+                                    class: "{item_class}",
+                                    onclick: move |_| on_toggle_repo.call(idx),
+                                    span { class: "repo-checkbox",
+                                        if is_checked { "☑" } else { "☐" }
+                                    }
+                                    if !props.collapsed {
+                                        span { class: "repo-name", "{repo_name}" }
+                                        if count > 0 {
+                                            span { class: "repo-badge", "{count}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Footer: theme toggle + settings + sign out
             div { class: "sidebar-footer",
                 {
                     let on_theme = props.on_toggle_theme;
