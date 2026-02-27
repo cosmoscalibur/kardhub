@@ -502,10 +502,14 @@ impl RestClient {
                 .get_reviews(owner, repo, item.number)
                 .await
                 .unwrap_or_default();
-            let ci = self
-                .get_ci_status(owner, repo, &item.head.branch_ref)
-                .await
-                .unwrap_or(CiStatus::Pending);
+            // Only fetch CI when reviewers exist (saves one API call per PR)
+            let ci = if r.is_empty() {
+                CiStatus::Pending
+            } else {
+                self.get_ci_status(owner, repo, &item.head.branch_ref)
+                    .await
+                    .unwrap_or(CiStatus::Pending)
+            };
             prs.push(PullRequest {
                 number: item.number,
                 title: item.title,
