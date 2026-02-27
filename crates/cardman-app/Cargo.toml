@@ -1,0 +1,11 @@
+[package]
+name = "cardman-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dioxus desktop application for Cardman."
+
+[dependencies]
+dioxus = { version = "0.6", features = ["desktop", "router"] }
+cardman-core.workspace = true
+serde.workspace = true

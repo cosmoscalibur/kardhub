@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Cardman",
+  "version": "0.1.0",
+  "description": "Kanban task manager synced with GitHub",
+  "permissions": ["identity"],
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "Cardman"
+  }
+}
