@@ -8,10 +8,11 @@ mod components;
 
 use cache::{
     AppSettings, cached_card_count, clear_all_cache, closed_sync_time, is_cards_fresh,
-    is_repos_fresh, is_sources_fresh, load_cards, load_closed_issues, load_merged_prs,
-    load_open_issues, load_prs, load_repos, load_settings, load_sources, merged_sync_time,
-    open_sync_time, prs_sync_time, save_cards, save_closed_issues, save_merged_prs,
-    save_open_issues, save_prs, save_repos, save_settings, save_sources, source_key,
+    is_members_fresh, is_repos_fresh, is_sources_fresh, load_cards, load_closed_issues,
+    load_merged_prs, load_open_issues, load_prs, load_repos, load_settings, load_sources,
+    merged_sync_time, open_sync_time, prs_sync_time, save_cards, save_closed_issues, save_members,
+    save_merged_prs, save_open_issues, save_prs, save_repos, save_settings, save_sources,
+    source_key,
 };
 use cardman_core::github::RestClient;
 use cardman_core::mapping::{MappingConfig, map_card};
@@ -453,6 +454,16 @@ fn app() -> Element {
                                         save_repos(&sk, &fetched);
                                         fetched
                                     };
+
+                                    // Fetch members when selecting an org source
+                                    if let SourceKind::Organization(ref org) = new_source_clone
+                                        && !is_members_fresh(org)
+                                    {
+                                        let client = RestClient::new(token.clone());
+                                        if let Ok(members) = client.list_members(org).await {
+                                            save_members(org, &members);
+                                        }
+                                    }
 
                                     // Restore last selected repos for this source
                                     let default_selected: Vec<usize> = settings

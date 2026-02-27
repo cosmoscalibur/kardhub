@@ -32,19 +32,19 @@ pub struct CardItemProps {
 #[component]
 pub fn CardItem(props: CardItemProps) -> Element {
     let card = &props.card;
-    let (number, title, labels, assignees) = match &card.source {
+    let (number, title, labels, users) = match &card.source {
         CardSource::Issue(issue) => (
             issue.number,
             issue.title.as_str(),
             &issue.labels,
-            &issue.assignees,
+            issue.assignees.clone(),
         ),
-        CardSource::PullRequest(pr) => (
-            pr.number,
-            pr.title.as_str(),
-            &pr.labels,
-            &vec![], // PRs don't carry assignees in our model
-        ),
+        CardSource::PullRequest(pr) => {
+            // Show author + assignees for PRs
+            let mut users = vec![pr.author.clone()];
+            users.extend(pr.assignees.iter().cloned());
+            (pr.number, pr.title.as_str(), &pr.labels, users)
+        }
     };
 
     // Separate priority labels from display labels
@@ -89,14 +89,25 @@ pub fn CardItem(props: CardItemProps) -> Element {
                     span { class: "card-priority", "#{priority.0}" }
                 }
 
-                // Assignees
-                if !assignees.is_empty() {
+                // User avatars (author for PRs, assignees for issues)
+                if !users.is_empty() {
                     div { class: "card-assignees",
-                        for assignee in assignees {
-                            span {
-                                class: "card-assignee",
-                                title: "{assignee.login}",
-                                "{assignee.login.chars().next().unwrap_or('?').to_uppercase()}"
+                        for u in &users {
+                            if u.avatar_url.is_empty() {
+                                span {
+                                    class: "card-assignee",
+                                    title: "{u.login}",
+                                    "{u.login.chars().next().unwrap_or('?').to_uppercase()}"
+                                }
+                            } else {
+                                img {
+                                    class: "card-avatar",
+                                    src: "{u.avatar_url}",
+                                    alt: "{u.login}",
+                                    title: "{u.login}",
+                                    width: "20",
+                                    height: "20",
+                                }
                             }
                         }
                     }

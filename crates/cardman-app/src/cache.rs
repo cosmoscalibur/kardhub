@@ -13,7 +13,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use cardman_core::models::{Card, Issue, PullRequest};
+use cardman_core::models::{Card, Issue, PullRequest, User};
 use serde::{Deserialize, Serialize};
 
 // ── Per-type TTL constants (seconds) ─────────────────────────────────
@@ -213,6 +213,27 @@ pub fn save_repos(src_key: &str, repos: &[String]) {
 /// Check whether repos cache is fresh (< 1 month).
 pub fn is_repos_fresh(src_key: &str) -> bool {
     is_ts_fresh(&format!("repos_{src_key}.json"), TTL_REPOS)
+}
+
+// ── Members ──────────────────────────────────────────────────────────
+
+/// Save organization members and collaborators.
+pub fn save_members(org: &str, members: &[User]) {
+    let key = source_key(org);
+    save_timestamped(&format!("members_{key}.json"), &members.to_vec());
+}
+
+/// Load cached organization members and collaborators.
+#[allow(dead_code)] // Used by UI to resolve author/assignee logins
+pub fn load_members(org: &str) -> Option<Vec<User>> {
+    let key = source_key(org);
+    load_timestamped::<Vec<User>>(&format!("members_{key}.json")).map(|t| t.data)
+}
+
+/// Check whether members cache is fresh (< 1 month).
+pub fn is_members_fresh(org: &str) -> bool {
+    let key = source_key(org);
+    is_ts_fresh(&format!("members_{key}.json"), TTL_REPOS)
 }
 
 // ── Open issues ──────────────────────────────────────────────────────

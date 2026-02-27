@@ -575,6 +575,14 @@ select {
   font-weight: 600;
 }
 
+.card-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  object-fit: cover;
+}
+
 /* ── Login Screen ──────────────────────────────────────────────────── */
 .login-screen {
   display: flex;
