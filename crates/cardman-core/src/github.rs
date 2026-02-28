@@ -617,8 +617,8 @@ impl RestClient {
     /// List closed (merged + closed-not-merged) pull requests.
     ///
     /// When `since` is `Some`, paginates `state=closed` sorted by updated
-    /// desc and stops at the cutoff (incremental). When `None`, fetches all
-    /// closed PRs (full pagination, first sync). No reviews/CI needed.
+    /// desc and stops at the cutoff (incremental). When `None`, fetches
+    /// only the most recent 100 closed PRs (first sync optimisation).
     pub async fn list_closed_prs(
         &self,
         owner: &str,
@@ -636,8 +636,16 @@ impl RestClient {
                 .await?
             }
             None => {
-                self.paginate(&format!("/repos/{owner}/{repo}/pulls?state=closed"))
-                    .await?
+                // First sync: fetch only the latest page (100 results).
+                let path = format!(
+                    "/repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100"
+                );
+                let resp = self
+                    .get(&path)
+                    .send()
+                    .await
+                    .map_err(|e| GitHubError::Http(e.to_string()))?;
+                self.handle_response(resp).await?
             }
         };
 
