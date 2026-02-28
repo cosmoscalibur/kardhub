@@ -3,6 +3,7 @@
 //! All types derive `Serialize` and `Deserialize` for JSON round-tripping
 //! with the GitHub API and local caching.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// A GitHub user.
@@ -92,6 +93,21 @@ pub struct Review {
     pub state: ReviewState,
 }
 
+/// A comment on an issue or pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Comment {
+    /// Comment ID.
+    pub id: u64,
+    /// Comment author.
+    pub user: User,
+    /// Comment body (GitHub-flavored markdown).
+    pub body: String,
+    /// Time the comment was created.
+    pub created_at: DateTime<Utc>,
+    /// Time the comment was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Aggregated CI status for a pull request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -111,6 +127,9 @@ pub struct PullRequest {
     pub number: u64,
     /// PR title.
     pub title: String,
+    /// PR body (GitHub-flavored markdown).
+    #[serde(default)]
+    pub body: Option<String>,
     /// Whether this PR is a draft.
     #[serde(default)]
     pub draft: bool,
@@ -183,6 +202,10 @@ pub enum CardSource {
 /// A Kanban card with computed column and priority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Card {
+    /// Repository owner (org or user login).
+    pub owner: String,
+    /// Repository name.
+    pub repo: String,
     /// The underlying issue or pull request.
     pub source: CardSource,
     /// The column this card belongs to (computed by the mapping engine).

@@ -6,11 +6,12 @@
 
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::models::{
-    CiStatus, Issue, IssueState, Label, Organization, PullRequest, Repository, Review, ReviewState,
-    User,
+    CiStatus, Comment, Issue, IssueState, Label, Organization, PullRequest, Repository, Review,
+    ReviewState, User,
 };
 
 /// Errors that may occur when interacting with the GitHub API.
@@ -114,7 +115,7 @@ struct GhIssue {
     assignees: Vec<GhUser>,
     state: String,
     #[allow(dead_code)]
-    updated_at: String,
+    updated_at: DateTime<Utc>,
     /// PR field presence indicates this is actually a PR, not an issue.
     pull_request: Option<serde_json::Value>,
 }
@@ -141,10 +142,12 @@ impl From<GhIssue> for Issue {
 struct GhPullRequest {
     number: u64,
     title: String,
+    /// PR body (GitHub-flavored markdown).
+    body: Option<String>,
     #[allow(dead_code)]
     state: String,
-    /// `null` for open/closed PRs, ISO-8601 timestamp for merged PRs.
-    merged_at: Option<String>,
+    /// `null` for open/closed PRs, UTC timestamp for merged PRs.
+    merged_at: Option<DateTime<Utc>>,
     /// Whether this is a draft PR.
     #[serde(default)]
     draft: bool,
@@ -158,7 +161,7 @@ struct GhPullRequest {
     requested_reviewers: Vec<GhUser>,
     head: GhPrHead,
     labels: Vec<GhLabel>,
-    updated_at: String,
+    updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +196,28 @@ impl From<GhReview> for Review {
 #[derive(Debug, Deserialize)]
 struct GhCombinedStatus {
     state: String,
+}
+
+/// GitHub API comment response.
+#[derive(Debug, Deserialize)]
+struct GhComment {
+    id: u64,
+    user: GhUser,
+    body: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl From<GhComment> for Comment {
+    fn from(c: GhComment) -> Self {
+        Self {
+            id: c.id,
+            user: c.user.into(),
+            body: c.body.unwrap_or_default(),
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+        }
+    }
 }
 
 /// GitHub API organization response.
@@ -341,13 +366,13 @@ impl RestClient {
         Ok(all)
     }
 
-    /// Paginate a PR endpoint until items are older than `cutoff` (ISO-8601).
+    /// Paginate a PR endpoint until items are older than `cutoff`.
     ///
     /// Expects the endpoint to return items sorted by `updated` desc.
     async fn paginate_until(
         &self,
         path: &str,
-        cutoff: &str,
+        cutoff: DateTime<Utc>,
     ) -> Result<Vec<GhPullRequest>, GitHubError> {
         let mut all = Vec::new();
         let mut page = 1u32;
@@ -365,7 +390,7 @@ impl RestClient {
             }
             let mut hit_cutoff = false;
             for item in items {
-                if item.updated_at.as_str() < cutoff {
+                if item.updated_at < cutoff {
                     hit_cutoff = true;
                     break;
                 }
@@ -451,12 +476,15 @@ impl RestClient {
         &self,
         owner: &str,
         repo: &str,
-        since: Option<&str>,
+        since: Option<DateTime<Utc>>,
     ) -> Result<Vec<Issue>, GitHubError> {
         let path = match since {
-            Some(ts) => format!(
-                "/repos/{owner}/{repo}/issues?state=open&sort=updated&direction=desc&since={ts}"
-            ),
+            Some(ts) => {
+                let ts_str = ts.to_rfc3339();
+                format!(
+                    "/repos/{owner}/{repo}/issues?state=open&sort=updated&direction=desc&since={ts_str}"
+                )
+            }
             None => format!("/repos/{owner}/{repo}/issues?state=open"),
         };
         let items: Vec<GhIssue> = self.paginate(&path).await?;
@@ -477,12 +505,13 @@ impl RestClient {
         &self,
         owner: &str,
         repo: &str,
-        since: Option<&str>,
+        since: Option<DateTime<Utc>>,
     ) -> Result<Vec<Issue>, GitHubError> {
         let items: Vec<GhIssue> = match since {
             Some(ts) => {
+                let ts_str = ts.to_rfc3339();
                 let path = format!(
-                    "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&since={ts}"
+                    "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&since={ts_str}"
                 );
                 self.paginate(&path).await?
             }
@@ -521,7 +550,7 @@ impl RestClient {
         &self,
         owner: &str,
         repo: &str,
-        since: Option<&str>,
+        since: Option<DateTime<Utc>>,
     ) -> Result<Vec<PullRequest>, GitHubError> {
         let items: Vec<GhPullRequest> = match since {
             Some(ts) => {
@@ -569,6 +598,7 @@ impl RestClient {
             prs.push(PullRequest {
                 number: item.number,
                 title: item.title,
+                body: item.body,
                 draft: item.draft,
                 author: item.user.into(),
                 assignees: item.assignees.into_iter().map(Into::into).collect(),
@@ -593,7 +623,7 @@ impl RestClient {
         &self,
         owner: &str,
         repo: &str,
-        since: Option<&str>,
+        since: Option<DateTime<Utc>>,
     ) -> Result<Vec<PullRequest>, GitHubError> {
         let items: Vec<GhPullRequest> = match since {
             Some(ts) => {
@@ -618,6 +648,7 @@ impl RestClient {
                 PullRequest {
                     number: item.number,
                     title: item.title,
+                    body: None, // Closed PRs: no body cached
                     draft: false,
                     author: item.user.into(),
                     assignees: item.assignees.into_iter().map(Into::into).collect(),
@@ -726,6 +757,85 @@ impl RestClient {
         let issue: GhIssue = self.handle_response(resp).await?;
         Ok(issue.into())
     }
+
+    /// List comments on an issue or pull request.
+    pub async fn list_comments(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<Comment>, GitHubError> {
+        let items: Vec<GhComment> = self
+            .paginate(&format!("/repos/{owner}/{repo}/issues/{number}/comments"))
+            .await?;
+        Ok(items.into_iter().map(Into::into).collect())
+    }
+
+    /// Add a comment to an issue or pull request.
+    pub async fn add_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<Comment, GitHubError> {
+        let payload = serde_json::json!({ "body": body });
+        let resp = self
+            .post(&format!("/repos/{owner}/{repo}/issues/{number}/comments"))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        let comment: GhComment = self.handle_response(resp).await?;
+        Ok(comment.into())
+    }
+
+    /// Update an existing comment.
+    pub async fn update_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        comment_id: u64,
+        body: &str,
+    ) -> Result<Comment, GitHubError> {
+        let payload = serde_json::json!({ "body": body });
+        let resp = self
+            .patch(&format!(
+                "/repos/{owner}/{repo}/issues/comments/{comment_id}"
+            ))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        let comment: GhComment = self.handle_response(resp).await?;
+        Ok(comment.into())
+    }
+
+    /// Update a pull request title and/or body.
+    pub async fn update_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        title: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<(), GitHubError> {
+        let mut payload = serde_json::Map::new();
+        if let Some(t) = title {
+            payload.insert("title".into(), serde_json::Value::String(t.to_string()));
+        }
+        if let Some(b) = body {
+            payload.insert("body".into(), serde_json::Value::String(b.to_string()));
+        }
+        let resp = self
+            .patch(&format!("/repos/{owner}/{repo}/pulls/{pr_number}"))
+            .json(&serde_json::Value::Object(payload))
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        self.handle_response::<serde_json::Value>(resp).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -769,7 +879,7 @@ mod tests {
             labels: vec![],
             assignees: vec![],
             state: "open".into(),
-            updated_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
             pull_request: Some(serde_json::json!({})),
         };
         // pull_request field is present, so this should be filtered out when listing issues

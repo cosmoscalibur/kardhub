@@ -11,19 +11,19 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 use cardman_core::models::{Card, Issue, PullRequest, User};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 // ── Per-type TTL constants (seconds) ─────────────────────────────────
 
 /// Organization list: 6 months.
-const TTL_SOURCES: u64 = 180 * 24 * 60 * 60;
+const TTL_SOURCES: i64 = 180 * 24 * 60 * 60;
 /// Repository list: 1 month.
-const TTL_REPOS: u64 = 30 * 24 * 60 * 60;
+const TTL_REPOS: i64 = 30 * 24 * 60 * 60;
 /// Open issues / open PRs / cards: 3 hours.
-const TTL_OPEN: u64 = 3 * 60 * 60;
+const TTL_OPEN: i64 = 3 * 60 * 60;
 
 /// User-configurable defaults persisted across sessions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -45,8 +45,8 @@ pub struct AppSettings {
 /// Wrapper that embeds a sync timestamp alongside cached data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Timestamped<T> {
-    /// ISO-8601 UTC timestamp of last sync.
-    pub synced_at: String,
+    /// UTC timestamp of last sync.
+    pub synced_at: DateTime<Utc>,
     /// The cached data.
     pub data: T,
 }
@@ -98,87 +98,21 @@ fn load_timestamped<T: for<'de> Deserialize<'de>>(name: &str) -> Option<Timestam
 /// Save data with current UTC timestamp.
 fn save_timestamped<T: Serialize>(name: &str, data: &T) {
     let ts = Timestamped {
-        synced_at: now_iso(),
+        synced_at: Utc::now(),
         data,
     };
     save_json(name, &ts);
 }
 
 /// Check whether a timestamped cache file is fresh (synced within `ttl_secs`).
-fn is_ts_fresh(name: &str, ttl_secs: u64) -> bool {
+fn is_ts_fresh(name: &str, ttl_secs: i64) -> bool {
     let Some(ts) = load_json::<Timestamped<serde_json::Value>>(name) else {
         return false;
     };
-    is_iso_within(&ts.synced_at, ttl_secs)
-}
-
-/// Check whether an ISO-8601 timestamp is within `ttl_secs` of now.
-fn is_iso_within(iso: &str, ttl_secs: u64) -> bool {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let Some(ts) = parse_iso_epoch(iso) else {
+    let Some(ttl) = Duration::try_seconds(ttl_secs) else {
         return false;
     };
-    now.saturating_sub(ts) < ttl_secs
-}
-
-/// Parse an ISO-8601 UTC timestamp to epoch seconds (basic parser).
-fn parse_iso_epoch(iso: &str) -> Option<u64> {
-    // Expected: "YYYY-MM-DDTHH:MM:SSZ"
-    if iso.len() < 20 {
-        return None;
-    }
-    let y: i64 = iso[0..4].parse().ok()?;
-    let mo: u64 = iso[5..7].parse().ok()?;
-    let d: u64 = iso[8..10].parse().ok()?;
-    let h: u64 = iso[11..13].parse().ok()?;
-    let mi: u64 = iso[14..16].parse().ok()?;
-    let s: u64 = iso[17..19].parse().ok()?;
-    // Days from epoch using inverse of Hinnant's algorithm
-    let (yr, mo2) = if mo <= 2 {
-        (y - 1, mo + 9)
-    } else {
-        (y, mo - 3)
-    };
-    let era = (if yr >= 0 { yr } else { yr - 399 }) / 400;
-    let yoe = (yr - era * 400) as u64;
-    let doy = (153 * mo2 + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = (era * 146_097 + doe as i64 - 719_468) as u64;
-    Some(days * 86400 + h * 3600 + mi * 60 + s)
-}
-
-/// Get current UTC time as ISO-8601 string.
-fn now_iso() -> String {
-    let epoch = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format_epoch_as_iso(epoch)
-}
-
-/// Format epoch seconds as ISO-8601 UTC string.
-fn format_epoch_as_iso(epoch: u64) -> String {
-    let days = (epoch / 86400) as i64;
-    let rem = epoch % 86400;
-    let h = rem / 3600;
-    let m = (rem % 3600) / 60;
-    let s = rem % 60;
-
-    let z = days + 719_468;
-    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
-    let yr = if mo <= 2 { y + 1 } else { y };
-
-    format!("{yr:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+    Utc::now().signed_duration_since(ts.synced_at) < ttl
 }
 
 // ── Sources (organizations) ──────────────────────────────────────────
@@ -349,7 +283,7 @@ pub fn is_cards_fresh(owner: &str, repo: &str) -> bool {
 // ── Sync timestamps (per data type) ──────────────────────────────────
 
 /// Get the last sync time for open issues from the open issues cache.
-pub fn open_sync_time(owner: &str, repo: &str) -> Option<String> {
+pub fn open_sync_time(owner: &str, repo: &str) -> Option<DateTime<Utc>> {
     let key_o = source_key(owner);
     let key_r = source_key(repo);
     load_timestamped::<serde_json::Value>(&format!("open_{key_o}_{key_r}.json"))
@@ -357,7 +291,7 @@ pub fn open_sync_time(owner: &str, repo: &str) -> Option<String> {
 }
 
 /// Get the last sync time for closed issues from the closed issues cache.
-pub fn closed_sync_time(owner: &str, repo: &str) -> Option<String> {
+pub fn closed_sync_time(owner: &str, repo: &str) -> Option<DateTime<Utc>> {
     let key_o = source_key(owner);
     let key_r = source_key(repo);
     load_timestamped::<serde_json::Value>(&format!("closed_{key_o}_{key_r}.json"))
@@ -365,14 +299,14 @@ pub fn closed_sync_time(owner: &str, repo: &str) -> Option<String> {
 }
 
 /// Get the last sync time for open PRs from the open PRs cache.
-pub fn prs_sync_time(owner: &str, repo: &str) -> Option<String> {
+pub fn prs_sync_time(owner: &str, repo: &str) -> Option<DateTime<Utc>> {
     let key_o = source_key(owner);
     let key_r = source_key(repo);
     load_timestamped::<serde_json::Value>(&format!("prs_{key_o}_{key_r}.json")).map(|t| t.synced_at)
 }
 
 /// Get the last sync time for merged/closed PRs from the merged PRs cache.
-pub fn merged_sync_time(owner: &str, repo: &str) -> Option<String> {
+pub fn merged_sync_time(owner: &str, repo: &str) -> Option<DateTime<Utc>> {
     let key_o = source_key(owner);
     let key_r = source_key(repo);
     load_timestamped::<serde_json::Value>(&format!("merged_{key_o}_{key_r}.json"))
