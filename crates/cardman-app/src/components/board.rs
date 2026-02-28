@@ -34,6 +34,8 @@ pub struct BoardProps {
     pub on_refresh: EventHandler<()>,
     /// Callback when a card is clicked.
     pub on_card_click: EventHandler<Card>,
+    /// Callback to open the create issue modal.
+    pub on_create: EventHandler<()>,
 }
 
 /// Check if a card is from a closed issue.
@@ -48,6 +50,7 @@ fn is_closed(card: &Card) -> bool {
 #[component]
 pub fn Board(props: BoardProps) -> Element {
     let on_refresh = props.on_refresh;
+    let on_create = props.on_create;
 
     rsx! {
         div { class: "main-content",
@@ -55,6 +58,11 @@ pub fn Board(props: BoardProps) -> Element {
             div { class: "board-header",
                 h1 { "Board" }
                 div { class: "board-actions",
+                    button {
+                        class: "create-btn",
+                        onclick: move |_| on_create.call(()),
+                        "➕ New Issue"
+                    }
                     if props.loading {
                         div { class: "board-status",
                             div { class: "sync-icon" }

@@ -18,6 +18,7 @@ use cardman_core::github::RestClient;
 use cardman_core::mapping::{MappingConfig, map_card};
 use cardman_core::models::{Card, CardSource, User};
 use components::board::Board;
+use components::create_issue::CreateIssue;
 use components::detail::CardDetail;
 use components::login::LoginScreen;
 use components::settings::Settings;
@@ -95,6 +96,7 @@ fn app() -> Element {
     let board_loading = use_signal(|| false);
     let mut selected_card = use_signal(|| Option::<Card>::None);
     let mut show_settings = use_signal(|| false);
+    let mut show_create_issue = use_signal(|| false);
     let mut app_settings = use_signal(load_settings);
 
     // Auto-login from saved token on first render
@@ -558,6 +560,9 @@ fn app() -> Element {
                             on_card_click: move |card: Card| {
                                 selected_card.set(Some(card));
                             },
+                            on_create: move |_| {
+                                show_create_issue.set(true);
+                            },
                         }
 
                         // Card detail panel
@@ -569,6 +574,60 @@ fn app() -> Element {
                                 on_close: move |_| {
                                     selected_card.set(None);
                                 },
+                            }
+                        }
+
+                        // Create issue modal
+                        if show_create_issue() {
+                            {
+                                let owner_ci = owner_for_source(&source, &user.login);
+                                let repos_ci = repos.clone();
+                                let selected_ci = selected_repos.clone();
+                                let repo_ci = selected_ci.first()
+                                    .and_then(|&i| repos_ci.get(i).cloned())
+                                    .unwrap_or_default();
+                                let token_ci = token.clone();
+                                let source_refresh = source.clone();
+                                let user_refresh = user.clone();
+                                let repos_refresh = repos.clone();
+                                let selected_refresh = selected_repos.clone();
+                                let token_ci_refresh = token_for_rc.clone();
+                                rsx! {
+                                    CreateIssue {
+                                        token: token_ci,
+                                        owner: owner_ci.clone(),
+                                        repo: repo_ci,
+                                        on_close: move |_| {
+                                            show_create_issue.set(false);
+                                        },
+                                        on_created: move |_| {
+                                            let token = token_ci_refresh.clone();
+                                            let source = source_refresh.clone();
+                                            let user = user_refresh.clone();
+                                            let repos = repos_refresh.clone();
+                                            let selected = selected_refresh.clone();
+                                            let owner = owner_for_source(&source, &user.login);
+                                            let mut state = state;
+                                            let mut board_loading = board_loading;
+                                            spawn(async move {
+                                                board_loading.set(true);
+                                                let mut all_cards = Vec::new();
+                                                for &idx in &selected {
+                                                    if let Some(repo_name) = repos.get(idx) {
+                                                        let cards = fetch_cards(&token, &owner, repo_name).await;
+                                                        save_cards(&owner, repo_name, &cards);
+                                                        all_cards.extend(cards);
+                                                    }
+                                                }
+                                                all_cards.sort_by(|a, b| a.priority.cmp(&b.priority));
+                                                if let AppState::Dashboard { cards: ref mut c, .. } = *state.write() {
+                                                    *c = all_cards;
+                                                }
+                                                board_loading.set(false);
+                                            });
+                                        },
+                                    }
+                                }
                             }
                         }
 
