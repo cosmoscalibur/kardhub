@@ -8,15 +8,15 @@ mod components;
 
 use cache::{
     AppSettings, cached_card_count, clear_all_cache, closed_sync_time, is_cards_fresh,
-    is_members_fresh, is_repos_fresh, is_sources_fresh, load_cards, load_closed_issues,
-    load_members, load_merged_prs, load_open_issues, load_prs, load_repos, load_settings,
-    load_sources, merged_sync_time, open_sync_time, prs_sync_time, save_cards, save_closed_issues,
-    save_members, save_merged_prs, save_open_issues, save_prs, save_repos, save_settings,
-    save_sources, source_key,
+    is_labels_fresh, is_members_fresh, is_repos_fresh, is_sources_fresh, load_cards,
+    load_closed_issues, load_labels, load_members, load_merged_prs, load_open_issues, load_prs,
+    load_repos, load_settings, load_sources, merged_sync_time, open_sync_time, prs_sync_time,
+    save_cards, save_closed_issues, save_labels, save_members, save_merged_prs, save_open_issues,
+    save_prs, save_repos, save_settings, save_sources, source_key,
 };
 use cardman_core::github::RestClient;
 use cardman_core::mapping::{MappingConfig, map_card};
-use cardman_core::models::{AuthenticatedUser, Card, CardSource, User};
+use cardman_core::models::{AuthenticatedUser, Card, CardSource, Label, User};
 use components::board::Board;
 use components::create_issue::CreateIssue;
 use components::detail::CardDetail;
@@ -280,6 +280,23 @@ fn app() -> Element {
                 })
                 .collect();
 
+            // Aggregate repo labels from selected repos.
+            let repo_labels: Vec<Label> = {
+                let mut all_labels = Vec::new();
+                for &idx in &selected_repos {
+                    if let Some(repo_name) = repos.get(idx)
+                        && let Some(labels) = load_labels(&owner, repo_name)
+                    {
+                        for label in labels {
+                            if !all_labels.iter().any(|l: &Label| l.name == label.name) {
+                                all_labels.push(label);
+                            }
+                        }
+                    }
+                }
+                all_labels
+            };
+
             // Pre-clone for closures
             let token_for_toggle = token.clone();
             let token_for_source = token.clone();
@@ -419,6 +436,14 @@ fn app() -> Element {
                                                 fetch_cards(&token, &owner, &repo_name)
                                                     .await;
                                             save_cards(&owner, &repo_name, &new_cards);
+
+                                            // Fetch labels if cache is stale (1 month TTL).
+                                            if !is_labels_fresh(&owner, &repo_name) {
+                                                let client = RestClient::new(token.clone());
+                                                if let Ok(labels) = client.list_labels(&owner, &repo_name).await {
+                                                    save_labels(&owner, &repo_name, &labels);
+                                                }
+                                            }
 
                                             if let AppState::Dashboard {
                                                 ref selected_repos,
@@ -602,8 +627,28 @@ fn app() -> Element {
                                 user_login: user.login.clone(),
                                 members: members_full.clone(),
                                 cards: cards_ac.clone(),
+                                repo_labels: repo_labels.clone(),
                                 on_close: move |_| {
                                     selected_card.set(None);
+                                },
+                                on_closed: move |updated_card: Card| {
+                                    selected_card.set(None);
+                                    // Move card to closed state locally (no sync).
+                                    if let AppState::Dashboard { cards: ref mut c, .. } = *state.write()
+                                        && let Some(pos) = c.iter().position(|card| {
+                                            let n1 = match &card.source {
+                                                CardSource::Issue(i) => i.number,
+                                                CardSource::PullRequest(p) => p.number,
+                                            };
+                                            let n2 = match &updated_card.source {
+                                                CardSource::Issue(i) => i.number,
+                                                CardSource::PullRequest(p) => p.number,
+                                            };
+                                            n1 == n2 && card.owner == updated_card.owner && card.repo == updated_card.repo
+                                        })
+                                    {
+                                        c[pos] = updated_card;
+                                    }
                                 },
                             }
                         }
@@ -631,6 +676,8 @@ fn app() -> Element {
                                         repos: repos_list,
                                         members: members_logins,
                                         cards: cards_ac,
+                                        repo_labels: repo_labels.clone(),
+                                        user_login: user.login.clone(),
                                         on_close: move |_| {
                                             show_create_issue.set(false);
                                         },

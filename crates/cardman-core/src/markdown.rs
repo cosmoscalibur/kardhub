@@ -99,66 +99,94 @@ fn find_protected_end(html: &str, pos: usize) -> Option<usize> {
     None
 }
 
-/// Apply all link patterns to a segment known to be outside code/link tags.
-fn linkify_segment(segment: &str, owner: &str, repo: &str) -> String {
-    let mut s = segment.to_string();
+/// Apply a single regex replacement only to text outside existing `<a>` tags.
+///
+/// Splits the input at `<a ...>...</a>` boundaries, applies `replacer` only
+/// to the unprotected segments, and concatenates the result.
+fn replace_outside_links(
+    html: &str,
+    re: &Regex,
+    replacer: impl Fn(&regex::Captures) -> String,
+) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut pos = 0;
 
+    while pos < html.len() {
+        // Look for the next `<a ` or `<a>` opening tag.
+        let rest = &html[pos..];
+        let link_start = rest.find("<a ").into_iter().chain(rest.find("<a>")).min();
+
+        let gap_end = link_start.map_or(html.len(), |i| pos + i);
+        // Apply regex only to the unprotected gap.
+        let gap = &html[pos..gap_end];
+        result.push_str(&re.replace_all(gap, &replacer));
+        pos = gap_end;
+
+        if pos < html.len() {
+            // Copy the entire `<a ...>...</a>` span verbatim.
+            if let Some(close_offset) = html[pos..].find("</a>") {
+                let end = pos + close_offset + 4; // past `</a>`
+                result.push_str(&html[pos..end]);
+                pos = end;
+            } else {
+                // Malformed: no closing tag — copy rest verbatim.
+                result.push_str(&html[pos..]);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Apply all link patterns to a segment known to be outside code/link tags.
+///
+/// Each step uses [`replace_outside_links`] so that `<a>` tags created by
+/// earlier steps are not processed by later regex passes.
+fn linkify_segment(segment: &str, owner: &str, repo: &str) -> String {
     // 1) Bare URLs — wrap in <a> tags.
-    s = RE_URL
-        .replace_all(&s, |caps: &regex::Captures| {
-            let url = &caps[0];
-            format!(r#"<a href="{url}">{url}</a>"#)
-        })
-        .into_owned();
+    let s = replace_outside_links(segment, &RE_URL, |caps| {
+        let url = &caps[0];
+        format!(r#"<a href="{url}">{url}</a>"#)
+    });
 
     // 2) @mentions.
-    s = RE_MENTION
-        .replace_all(&s, |caps: &regex::Captures| {
-            let pre = caps.name("pre").map_or("", |m| m.as_str());
-            let user = &caps["user"];
-            format!(r#"{pre}<a href="https://github.com/{user}">@{user}</a>"#)
-        })
-        .into_owned();
+    let s = replace_outside_links(&s, &RE_MENTION, |caps| {
+        let pre = caps.name("pre").map_or("", |m| m.as_str());
+        let user = &caps["user"];
+        format!(r#"{pre}<a href="https://github.com/{user}">@{user}</a>"#)
+    });
 
     // 3) Cross-repo shortlinks (before same-repo to avoid partial matches).
-    s = RE_CROSS_REF
-        .replace_all(&s, |caps: &regex::Captures| {
-            let pre = caps.name("pre").map_or("", |m| m.as_str());
-            let o = &caps["owner"];
-            let r = &caps["repo"];
-            let n = &caps["num"];
-            format!(r#"{pre}<a href="https://github.com/{o}/{r}/issues/{n}">{o}/{r}#{n}</a>"#)
-        })
-        .into_owned();
+    let s = replace_outside_links(&s, &RE_CROSS_REF, |caps| {
+        let pre = caps.name("pre").map_or("", |m| m.as_str());
+        let o = &caps["owner"];
+        let r = &caps["repo"];
+        let n = &caps["num"];
+        format!(r#"{pre}<a href="https://github.com/{o}/{r}/issues/{n}">{o}/{r}#{n}</a>"#)
+    });
 
     // 4) Same-repo #N shortlinks.
     let owner_ref = owner.to_string();
     let repo_ref = repo.to_string();
-    s = RE_ISSUE_REF
-        .replace_all(&s, |caps: &regex::Captures| {
-            let pre = caps.name("pre").map_or("", |m| m.as_str());
-            let n = &caps["num"];
-            format!(
-                r#"{pre}<a href="https://github.com/{}/{}/issues/{n}">#{n}</a>"#,
-                owner_ref, repo_ref
-            )
-        })
-        .into_owned();
+    let s = replace_outside_links(&s, &RE_ISSUE_REF, |caps| {
+        let pre = caps.name("pre").map_or("", |m| m.as_str());
+        let n = &caps["num"];
+        format!(
+            r#"{pre}<a href="https://github.com/{}/{}/issues/{n}">#{n}</a>"#,
+            owner_ref, repo_ref
+        )
+    });
 
     // 5) 7-char commit SHAs.
     let owner_sha = owner.to_string();
     let repo_sha = repo.to_string();
-    s = RE_SHA
-        .replace_all(&s, |caps: &regex::Captures| {
-            let sha = &caps["sha"];
-            format!(
-                r#"<a href="https://github.com/{}/{}/commit/{sha}">{sha}</a>"#,
-                owner_sha, repo_sha
-            )
-        })
-        .into_owned();
-
-    s
+    replace_outside_links(&s, &RE_SHA, |caps| {
+        let sha = &caps["sha"];
+        format!(
+            r#"<a href="https://github.com/{}/{}/commit/{sha}">{sha}</a>"#,
+            owner_sha, repo_sha
+        )
+    })
 }
 
 #[cfg(test)]
@@ -252,5 +280,20 @@ mod tests {
         // pulldown-cmark already creates the <a>, post-processing should not double-wrap.
         let count = html.matches("<a ").count();
         assert_eq!(count, 1, "should have exactly one <a> tag");
+    }
+
+    #[test]
+    fn url_with_hex_query_params() {
+        // Regression: 7-hex-char substrings in URL query params must NOT
+        // be converted to commit-SHA links.
+        let md = "https://example.com/issues/123/?project=5306434&query=foo";
+        let html = markdown_to_html(md, "o", "r");
+        assert!(
+            !html.contains("commit/5306434"),
+            "SHA regex should not match inside URLs: {html}"
+        );
+        // Should be a single <a> wrapping the full URL.
+        let count = html.matches("<a ").count();
+        assert_eq!(count, 1, "should have exactly one <a> tag: {html}");
     }
 }

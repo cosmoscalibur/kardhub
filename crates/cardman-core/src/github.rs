@@ -260,6 +260,8 @@ pub struct IssueUpdate {
     pub state: Option<IssueState>,
     /// Replace labels.
     pub labels: Option<Vec<String>>,
+    /// Replace assignees (login names).
+    pub assignees: Option<Vec<String>>,
 }
 
 // ── Native (reqwest) client ──────────────────────────────────────────
@@ -316,6 +318,15 @@ impl RestClient {
     fn patch(&self, path: &str) -> reqwest::RequestBuilder {
         self.http
             .patch(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+    }
+
+    /// Build an authenticated DELETE request.
+    fn delete_req(&self, path: &str) -> reqwest::RequestBuilder {
+        self.http
+            .delete(format!("{}{path}", self.base_url))
             .bearer_auth(&self.token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
@@ -739,6 +750,14 @@ impl RestClient {
         })
     }
 
+    /// List labels for a repository.
+    pub async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<Label>, GitHubError> {
+        let labels: Vec<GhLabel> = self
+            .paginate(&format!("/repos/{owner}/{repo}/labels"))
+            .await?;
+        Ok(labels.into_iter().map(Into::into).collect())
+    }
+
     /// Create an issue in a repository.
     pub async fn create_issue(
         &self,
@@ -747,6 +766,7 @@ impl RestClient {
         title: &str,
         body: Option<&str>,
         labels: &[String],
+        assignees: &[String],
     ) -> Result<Issue, GitHubError> {
         let mut payload = serde_json::json!({ "title": title });
         if let Some(b) = body {
@@ -754,6 +774,9 @@ impl RestClient {
         }
         if !labels.is_empty() {
             payload["labels"] = serde_json::json!(labels);
+        }
+        if !assignees.is_empty() {
+            payload["assignees"] = serde_json::json!(assignees);
         }
         let resp = self
             .post(&format!("/repos/{owner}/{repo}/issues"))
@@ -789,6 +812,9 @@ impl RestClient {
         }
         if let Some(l) = &update.labels {
             payload.insert("labels".into(), serde_json::json!(l));
+        }
+        if let Some(a) = &update.assignees {
+            payload.insert("assignees".into(), serde_json::json!(a));
         }
         let resp = self
             .patch(&format!("/repos/{owner}/{repo}/issues/{issue_number}"))
@@ -853,7 +879,7 @@ impl RestClient {
         Ok(comment.into())
     }
 
-    /// Update a pull request title and/or body.
+    /// Update a pull request title, body, and/or state.
     pub async fn update_pr(
         &self,
         owner: &str,
@@ -861,6 +887,7 @@ impl RestClient {
         pr_number: u64,
         title: Option<&str>,
         body: Option<&str>,
+        state: Option<&str>,
     ) -> Result<(), GitHubError> {
         let mut payload = serde_json::Map::new();
         if let Some(t) = title {
@@ -869,6 +896,9 @@ impl RestClient {
         if let Some(b) = body {
             payload.insert("body".into(), serde_json::Value::String(b.to_string()));
         }
+        if let Some(s) = state {
+            payload.insert("state".into(), serde_json::Value::String(s.to_string()));
+        }
         let resp = self
             .patch(&format!("/repos/{owner}/{repo}/pulls/{pr_number}"))
             .json(&serde_json::Value::Object(payload))
@@ -876,6 +906,48 @@ impl RestClient {
             .await
             .map_err(|e| GitHubError::Http(e.to_string()))?;
         self.handle_response::<serde_json::Value>(resp).await?;
+        Ok(())
+    }
+
+    /// Delete a branch by reference name.
+    ///
+    /// Uses `DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}`.
+    pub async fn delete_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<(), GitHubError> {
+        let resp = self
+            .delete_req(&format!("/repos/{owner}/{repo}/git/refs/heads/{branch}"))
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        let status = resp.status();
+        if status.is_success() || status == reqwest::StatusCode::NO_CONTENT {
+            return Ok(());
+        }
+        if status == reqwest::StatusCode::NOT_FOUND {
+            // Branch already deleted — treat as success.
+            return Ok(());
+        }
+        let text = resp.text().await.unwrap_or_default();
+        Err(GitHubError::Http(format!("{status}: {text}")))
+    }
+
+    /// Close a pull request and delete its head branch.
+    ///
+    /// Combines `update_pr(state="closed")` with `delete_branch`.
+    pub async fn close_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        branch: &str,
+    ) -> Result<(), GitHubError> {
+        self.update_pr(owner, repo, pr_number, None, None, Some("closed"))
+            .await?;
+        self.delete_branch(owner, repo, branch).await?;
         Ok(())
     }
 }
@@ -960,5 +1032,27 @@ mod tests {
         assert!(err.to_string().contains("rate limit"));
         let err = GitHubError::NotFound("repo".into());
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn issue_update_default_omits_assignees() {
+        let update = IssueUpdate::default();
+        assert!(update.assignees.is_none());
+        assert!(update.title.is_none());
+        assert!(update.body.is_none());
+        assert!(update.state.is_none());
+        assert!(update.labels.is_none());
+    }
+
+    #[test]
+    fn issue_update_serializes_assignees() {
+        let update = IssueUpdate {
+            assignees: Some(vec!["octocat".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(
+            update.assignees.as_ref().unwrap(),
+            &vec!["octocat".to_string()]
+        );
     }
 }

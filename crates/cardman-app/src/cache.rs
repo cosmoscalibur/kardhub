@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use cardman_core::models::{Card, Issue, PullRequest, User};
+use cardman_core::models::{Card, Issue, Label, PullRequest, User};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -177,6 +177,32 @@ pub fn load_members(org: &str) -> Option<Vec<User>> {
 pub fn is_members_fresh(org: &str) -> bool {
     let key = source_key(org);
     is_ts_fresh(&format!("members_{key}.json"), TTL_REPOS)
+}
+
+// ── Labels ───────────────────────────────────────────────────────────
+
+/// Labels TTL: 1 month.
+const TTL_LABELS: i64 = 30 * 24 * 60 * 60;
+
+/// Save repository labels.
+pub fn save_labels(owner: &str, repo: &str, labels: &[Label]) {
+    let key_o = source_key(owner);
+    let key_r = source_key(repo);
+    save_timestamped(&format!("labels_{key_o}_{key_r}.json"), &labels.to_vec());
+}
+
+/// Load cached repository labels.
+pub fn load_labels(owner: &str, repo: &str) -> Option<Vec<Label>> {
+    let key_o = source_key(owner);
+    let key_r = source_key(repo);
+    load_timestamped::<Vec<Label>>(&format!("labels_{key_o}_{key_r}.json")).map(|t| t.data)
+}
+
+/// Check whether labels cache is fresh (< 1 month).
+pub fn is_labels_fresh(owner: &str, repo: &str) -> bool {
+    let key_o = source_key(owner);
+    let key_r = source_key(repo);
+    is_ts_fresh(&format!("labels_{key_o}_{key_r}.json"), TTL_LABELS)
 }
 
 // ── Open issues ──────────────────────────────────────────────────────

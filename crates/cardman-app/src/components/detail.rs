@@ -6,7 +6,9 @@
 
 use cardman_core::github::RestClient;
 use cardman_core::markdown::markdown_to_html;
-use cardman_core::models::{Card, CardSource, CiStatus, Comment, IssueState, ReviewState, User};
+use cardman_core::models::{
+    Card, CardSource, CiStatus, Comment, IssueState, Label, ReviewState, User,
+};
 use dioxus::prelude::*;
 
 use super::card::label_style;
@@ -27,8 +29,13 @@ pub struct CardDetailProps {
     /// Card `(number, title)` pairs for `#` autocomplete.
     #[props(default = Vec::new())]
     pub cards: Vec<(u64, String)>,
+    /// Available repository labels for editing.
+    #[props(default = Vec::new())]
+    pub repo_labels: Vec<Label>,
     /// Callback to close the panel.
     pub on_close: EventHandler<()>,
+    /// Callback when the issue/PR is closed (provides updated card for local move).
+    pub on_closed: EventHandler<Card>,
 }
 
 /// Right-side detail panel showing full card information.
@@ -36,12 +43,14 @@ pub struct CardDetailProps {
 pub fn CardDetail(props: CardDetailProps) -> Element {
     let card = &props.card;
     let on_close = props.on_close;
+    let on_closed = props.on_closed;
     let token = props.token.clone();
     let user_login = props.user_login.clone();
     let owner = card.owner.clone();
     let repo = card.repo.clone();
     let members_list = props.members.clone();
     let cards_ac = props.cards.clone();
+    let repo_labels = props.repo_labels.clone();
     // Login strings for autocomplete.
     let members_ac: Vec<String> = members_list.iter().map(|u| u.login.clone()).collect();
 
@@ -128,6 +137,29 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let mut editing_comment_id: Signal<Option<u64>> = use_signal(|| None);
     let mut comment_edit_text = use_signal(String::new);
     let mut saving_edit_comment = use_signal(|| false);
+    let mut closing = use_signal(|| false);
+    let mut close_error: Signal<Option<String>> = use_signal(|| None);
+
+    // Inline editing signals.
+    let mut editing_title = use_signal(|| false);
+    let mut title_draft = use_signal(|| title.to_string());
+    let mut saving_title = use_signal(|| false);
+    let mut editing_priority = use_signal(|| false);
+    let mut priority_draft: Signal<u8> = use_signal(|| card.priority.map_or(1, |p| p.0));
+    let mut saving_priority = use_signal(|| false);
+    let mut editing_labels = use_signal(|| false);
+    let mut selected_labels: Signal<Vec<String>> = use_signal(|| {
+        // Only track non-priority labels; priority labels are managed separately.
+        labels
+            .iter()
+            .filter(|l| cardman_core::models::Priority::from_label(&l.name).is_none())
+            .map(|l| l.name.clone())
+            .collect()
+    });
+    let mut saving_labels = use_signal(|| false);
+    let mut editing_assignees = use_signal(|| false);
+    let mut selected_assignees: Signal<Vec<String>> = use_signal(|| assignee_logins.to_vec());
+    let mut saving_assignees = use_signal(|| false);
 
     // Lazy-load comments.
     {
@@ -157,6 +189,13 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let display_labels: Vec<_> = labels
         .iter()
         .filter(|l| cardman_core::models::Priority::from_label(&l.name).is_none())
+        .collect();
+
+    // Owned list of priority label names (for preserving in label save).
+    let priority_label_names: Vec<String> = labels
+        .iter()
+        .filter(|l| cardman_core::models::Priority::from_label(&l.name).is_some())
+        .map(|l| l.name.clone())
         .collect();
 
     // Clones for closures.
@@ -213,7 +252,70 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
 
             // Body
             div { class: "detail-body",
-                div { class: "detail-title", "{title}" }
+                // ── Title (editable) ───────────────────────────────
+                if editing_title() {
+                    div { class: "detail-title-edit",
+                        input {
+                            class: "modal-input",
+                            r#type: "text",
+                            value: "{title_draft}",
+                            oninput: move |e| title_draft.set(e.value()),
+                        }
+                        div { class: "detail-edit-actions",
+                            button {
+                                class: "modal-btn modal-btn-secondary",
+                                onclick: move |_| editing_title.set(false),
+                                "Cancel"
+                            }
+                            button {
+                                class: "modal-btn modal-btn-primary",
+                                disabled: saving_title() || title_draft().trim().is_empty(),
+                                onclick: {
+                                    let token = token.clone();
+                                    let owner = owner.clone();
+                                    let repo = repo.clone();
+                                    #[allow(clippy::redundant_locals)]
+                                    let is_pr = is_pr;
+                                    move |_| {
+                                        let token = token.clone();
+                                        let owner = owner.clone();
+                                        let repo = repo.clone();
+                                        let new_title = title_draft().trim().to_string();
+                                        spawn(async move {
+                                            saving_title.set(true);
+                                            let client = RestClient::new(token);
+                                            let ok = if is_pr {
+                                                client.update_pr(&owner, &repo, number, Some(&new_title), None, None).await.is_ok()
+                                            } else {
+                                                let update = cardman_core::github::IssueUpdate {
+                                                    title: Some(new_title),
+                                                    ..Default::default()
+                                                };
+                                                client.update_issue(&owner, &repo, number, &update).await.is_ok()
+                                            };
+                                            if ok {
+                                                editing_title.set(false);
+                                            }
+                                            saving_title.set(false);
+                                        });
+                                    }
+                                },
+                                if saving_title() { "Saving…" } else { "Save" }
+                            }
+                        }
+                    }
+                } else {
+                    div { class: "detail-title",
+                        "{title}"
+                        if can_edit_body {
+                            button {
+                                class: "detail-edit-btn",
+                                onclick: move |_| editing_title.set(true),
+                                "✏️"
+                            }
+                        }
+                    }
+                }
                 div { class: "detail-number", "#{number}" }
 
                 // State
@@ -228,18 +330,182 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                     {render_user_badge(&resolve_login(author, &members_list))}
                 }
 
-                // Priority
-                if let Some(priority) = &card.priority {
+                // Priority (editable, issues only)
+                if !is_pr {
                     div { class: "detail-section",
-                        div { class: "detail-section-title", "Priority" }
-                        span { class: "card-priority", "#{priority.0}" }
+                        div { class: "detail-section-header",
+                            div { class: "detail-section-title", "Priority" }
+                            if is_open && !editing_priority() {
+                                button {
+                                    class: "detail-edit-btn",
+                                    onclick: move |_| editing_priority.set(true),
+                                    "✏️"
+                                }
+                            }
+                        }
+                        if editing_priority() {
+                            div { class: "priority-select",
+                                select {
+                                    value: "{priority_draft}",
+                                    onchange: move |e| {
+                                        if let Ok(v) = e.value().parse::<u8>() {
+                                            priority_draft.set(v);
+                                        }
+                                    },
+                                    for i in 1u8..=6 {
+                                        option { value: "{i}", selected: priority_draft() == i, "#{i}" }
+                                    }
+                                }
+                            }
+                            div { class: "detail-edit-actions",
+                                button {
+                                    class: "modal-btn modal-btn-secondary",
+                                    onclick: move |_| editing_priority.set(false),
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "modal-btn modal-btn-primary",
+                                    disabled: saving_priority(),
+                                    onclick: {
+                                        let token = token.clone();
+                                        let owner = owner.clone();
+                                        let repo = repo.clone();
+                                        let priority_label_names = priority_label_names.clone();
+                                        move |_| {
+                                            let token = token.clone();
+                                            let owner = owner.clone();
+                                            let repo = repo.clone();
+                                            let new_priority = priority_draft();
+                                            let new_priority_label = format!("#{new_priority}");
+                                            // Build updated label list: remove old priority, add new.
+                                            let mut all_labels: Vec<String> = selected_labels()
+                                                .into_iter()
+                                                .chain(std::iter::once(new_priority_label))
+                                                .collect();
+                                            // Remove any old priority labels that aren't the new one.
+                                            for old in &priority_label_names {
+                                                all_labels.retain(|l| l != old);
+                                            }
+                                            // Re-add the new priority.
+                                            all_labels.push(format!("#{new_priority}"));
+                                            all_labels.dedup();
+                                            spawn(async move {
+                                                saving_priority.set(true);
+                                                let client = RestClient::new(token);
+                                                let update = cardman_core::github::IssueUpdate {
+                                                    labels: Some(all_labels),
+                                                    ..Default::default()
+                                                };
+                                                if client.update_issue(&owner, &repo, number, &update).await.is_ok() {
+                                                    editing_priority.set(false);
+                                                }
+                                                saving_priority.set(false);
+                                            });
+                                        }
+                                    },
+                                    if saving_priority() { "Saving…" } else { "Save" }
+                                }
+                            }
+                        } else if let Some(priority) = &card.priority {
+                            span { class: "card-priority", "#{priority.0}" }
+                        } else {
+                            div { class: "detail-empty", "Not set" }
+                        }
                     }
                 }
 
-                // Labels
-                if !display_labels.is_empty() {
-                    div { class: "detail-section",
+                // Labels (editable)
+                div { class: "detail-section",
+                    div { class: "detail-section-header",
                         div { class: "detail-section-title", "Labels" }
+                        if is_open && !editing_labels() {
+                            button {
+                                class: "detail-edit-btn",
+                                onclick: move |_| editing_labels.set(true),
+                                "✏️"
+                            }
+                        }
+                    }
+                    if editing_labels() {
+                        {
+                            // Only show non-priority labels in the multi-select.
+                            let editable_repo_labels: Vec<_> = repo_labels
+                                .iter()
+                                .filter(|l| cardman_core::models::Priority::from_label(&l.name).is_none())
+                                .collect();
+                            rsx! {
+                                div { class: "multi-select",
+                                    for label in &editable_repo_labels {
+                                        {
+                                            let label_name = label.name.clone();
+                                            let is_checked = selected_labels().contains(&label.name);
+                                            rsx! {
+                                                label { class: "multi-select-item",
+                                                    input {
+                                                        r#type: "checkbox",
+                                                        checked: is_checked,
+                                                        onchange: move |_| {
+                                                            let mut current = selected_labels();
+                                                            if let Some(pos) = current.iter().position(|l| l == &label_name) {
+                                                                current.remove(pos);
+                                                            } else {
+                                                                current.push(label_name.clone());
+                                                            }
+                                                            selected_labels.set(current);
+                                                        },
+                                                    }
+                                                    span {
+                                                        class: "card-label",
+                                                        style: "{label_style(&label.color)}",
+                                                        "{label.name}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                div { class: "detail-edit-actions",
+                                    button {
+                                        class: "modal-btn modal-btn-secondary",
+                                        onclick: move |_| editing_labels.set(false),
+                                        "Cancel"
+                                    }
+                                    button {
+                                        class: "modal-btn modal-btn-primary",
+                                        disabled: saving_labels(),
+                                        onclick: {
+                                            let token = token.clone();
+                                            let owner = owner.clone();
+                                            let repo = repo.clone();
+                                            move |_| {
+                                                let token = token.clone();
+                                                let owner = owner.clone();
+                                                let repo = repo.clone();
+                                                let new_labels = selected_labels();
+                                                // Preserve existing priority labels when saving.
+                                                let all_labels: Vec<String> = priority_label_names.iter().cloned().chain(new_labels).collect();
+                                                spawn(async move {
+                                                    saving_labels.set(true);
+                                                    let client = RestClient::new(token);
+                                                    let update = cardman_core::github::IssueUpdate {
+                                                        labels: Some(all_labels),
+                                                        ..Default::default()
+                                                    };
+                                                    if client.update_issue(&owner, &repo, number, &update).await.is_ok() {
+                                                        editing_labels.set(false);
+                                                    }
+                                                    saving_labels.set(false);
+                                                });
+                                            }
+                                        },
+                                        if saving_labels() { "Saving…" } else { "Save" }
+                                    }
+                                }
+                            }
+                        }
+                    } else if display_labels.is_empty() {
+                        div { class: "detail-empty", "No labels." }
+                    } else {
                         div { class: "detail-labels",
                             for label in &display_labels {
                                 span {
@@ -252,10 +518,83 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                     }
                 }
 
-                // Assignees
-                if !assignee_logins.is_empty() {
-                    div { class: "detail-section",
+                // Assignees (editable)
+                div { class: "detail-section",
+                    div { class: "detail-section-header",
                         div { class: "detail-section-title", "Assignees" }
+                        if is_open && !editing_assignees() {
+                            button {
+                                class: "detail-edit-btn",
+                                onclick: move |_| editing_assignees.set(true),
+                                "✏️"
+                            }
+                        }
+                    }
+                    if editing_assignees() {
+                        div { class: "multi-select",
+                            for member in &members_list {
+                                {
+                                    let login = member.login.clone();
+                                    let is_checked = selected_assignees().contains(&member.login);
+                                    rsx! {
+                                        label { class: "multi-select-item",
+                                            input {
+                                                r#type: "checkbox",
+                                                checked: is_checked,
+                                                onchange: move |_| {
+                                                    let mut current = selected_assignees();
+                                                    if let Some(pos) = current.iter().position(|l| l == &login) {
+                                                        current.remove(pos);
+                                                    } else {
+                                                        current.push(login.clone());
+                                                    }
+                                                    selected_assignees.set(current);
+                                                },
+                                            }
+                                            "{member.login}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "detail-edit-actions",
+                            button {
+                                class: "modal-btn modal-btn-secondary",
+                                onclick: move |_| editing_assignees.set(false),
+                                "Cancel"
+                            }
+                            button {
+                                class: "modal-btn modal-btn-primary",
+                                disabled: saving_assignees(),
+                                onclick: {
+                                    let token = token.clone();
+                                    let owner = owner.clone();
+                                    let repo = repo.clone();
+                                    move |_| {
+                                        let token = token.clone();
+                                        let owner = owner.clone();
+                                        let repo = repo.clone();
+                                        let new_assignees = selected_assignees();
+                                        spawn(async move {
+                                            saving_assignees.set(true);
+                                            let client = RestClient::new(token);
+                                            let update = cardman_core::github::IssueUpdate {
+                                                assignees: Some(new_assignees),
+                                                ..Default::default()
+                                            };
+                                            if client.update_issue(&owner, &repo, number, &update).await.is_ok() {
+                                                editing_assignees.set(false);
+                                            }
+                                            saving_assignees.set(false);
+                                        });
+                                    }
+                                },
+                                if saving_assignees() { "Saving…" } else { "Save" }
+                            }
+                        }
+                    } else if assignee_logins.is_empty() {
+                        div { class: "detail-empty", "No assignees." }
+                    } else {
                         div { class: "detail-assignees",
                             for login in assignee_logins {
                                 {render_user_badge(&resolve_login(login, &members_list))}
@@ -335,13 +674,14 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                                         saving_body.set(true);
                                         let client = RestClient::new(token);
                                         let ok = if is_pr_val {
-                                            client.update_pr(&owner, &repo, number, None, Some(&text)).await.is_ok()
+                                            client.update_pr(&owner, &repo, number, None, Some(&text), None).await.is_ok()
                                         } else {
                                             let update = cardman_core::github::IssueUpdate {
                                                 title: None,
                                                 body: Some(text.clone()),
                                                 state: None,
                                                 labels: None,
+                                                assignees: None,
                                             };
                                             client.update_issue(&owner, &repo, number, &update).await.is_ok()
                                         };
@@ -497,10 +837,75 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                                         },
                                         if saving_comment() { "Adding…" } else { "Comment" }
                                     }
+                                    // "Close with comment" button
+                                    {
+                                        let token_close = token.clone();
+                                        let owner_close = owner.clone();
+                                        let repo_close = repo.clone();
+                                        #[allow(clippy::redundant_locals)]
+                                        let is_pr_close = is_pr;
+                                        let pr_branch = match &card.source {
+                                            CardSource::PullRequest(pr) => pr.branch.clone(),
+                                            _ => String::new(),
+                                        };
+                                        let card_for_close = card.clone();
+                                        rsx! {
+                                            button {
+                                                class: "modal-btn close-with-comment-btn",
+                                                disabled: new_comment_text().trim().is_empty() || closing(),
+                                                onclick: move |_| {
+                                                    let token = token_close.clone();
+                                                    let owner = owner_close.clone();
+                                                    let repo = repo_close.clone();
+                                                    let comment = new_comment_text().trim().to_string();
+                                                    let branch = pr_branch.clone();
+                                                    let mut card_updated = card_for_close.clone();
+                                                    spawn(async move {
+                                                        closing.set(true);
+                                                        close_error.set(None);
+                                                        let client = RestClient::new(token);
+                                                        // Add closing comment.
+                                                        if let Err(e) = client.add_comment(&owner, &repo, number, &comment).await {
+                                                            close_error.set(Some(format!("Failed to add comment: {e}")));
+                                                            closing.set(false);
+                                                            return;
+                                                        }
+                                                        // Close the item.
+                                                        let close_ok = if is_pr_close {
+                                                            client.close_pr(&owner, &repo, number, &branch).await.is_ok()
+                                                        } else {
+                                                            let update = cardman_core::github::IssueUpdate {
+                                                                state: Some(IssueState::Closed),
+                                                                ..Default::default()
+                                                            };
+                                                            client.update_issue(&owner, &repo, number, &update).await.is_ok()
+                                                        };
+                                                        closing.set(false);
+                                                        if close_ok {
+                                                            // Update local card state to closed.
+                                                            match &mut card_updated.source {
+                                                                CardSource::Issue(i) => i.state = IssueState::Closed,
+                                                                CardSource::PullRequest(pr) => pr.closed = true,
+                                                            }
+                                                            on_closed.call(card_updated);
+                                                        } else {
+                                                            close_error.set(Some("GitHub rejected the close request.".to_string()));
+                                                        }
+                                                    });
+                                                },
+                                                if closing() { "Closing…" } else { "Close with comment" }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
+                }
+
+                // Error modal for close failures.
+                if let Some(err) = close_error() {
+                    div { class: "modal-error", "{err}" }
                 }
             }
         }

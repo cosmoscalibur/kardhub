@@ -34,7 +34,7 @@ pub struct BoardProps {
     pub on_refresh: EventHandler<()>,
     /// Callback when a card is clicked.
     pub on_card_click: EventHandler<Card>,
-    /// Callback to open the create issue modal.
+    /// Callback to open the create issue panel.
     pub on_create: EventHandler<()>,
     /// Cached members for resolving login → avatar.
     #[props(default = Vec::new())]

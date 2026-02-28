@@ -85,6 +85,7 @@ pub fn CardItem(props: CardItemProps) -> Element {
         div {
             class: "card",
             onclick: move |_| on_click.call(card_clone.clone()),
+
             // Labels row
             if !display_labels.is_empty() {
                 div { class: "card-labels",
