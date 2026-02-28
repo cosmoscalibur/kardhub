@@ -564,6 +564,8 @@ fn app() -> Element {
                         if let Some(card) = selected_card() {
                             CardDetail {
                                 card: card,
+                                token: token.clone(),
+                                user_login: user.login.clone(),
                                 on_close: move |_| {
                                     selected_card.set(None);
                                 },
@@ -857,7 +859,7 @@ async fn fetch_cards(token: &str, owner: &str, repo: &str) -> Vec<Card> {
     // ── Open issues ────────────────────────────────────────────────
     let open_since = open_sync_time(owner, repo);
     let fetched_open = client
-        .list_open_issues(owner, repo, open_since.as_deref())
+        .list_open_issues(owner, repo, open_since)
         .await
         .unwrap_or_default();
 
@@ -882,7 +884,7 @@ async fn fetch_cards(token: &str, owner: &str, repo: &str) -> Vec<Card> {
     // ── Closed issues (cumulative) ───────────────────────────────
     let closed_since = closed_sync_time(owner, repo);
     let new_closed = client
-        .list_closed_issues(owner, repo, closed_since.as_deref())
+        .list_closed_issues(owner, repo, closed_since)
         .await
         .unwrap_or_default();
     if !new_closed.is_empty() {
@@ -894,7 +896,7 @@ async fn fetch_cards(token: &str, owner: &str, repo: &str) -> Vec<Card> {
     // ── Open PRs (incremental, with reviews/CI) ─────────────────
     let pr_open_since = prs_sync_time(owner, repo);
     let fetched_open_prs = client
-        .list_open_prs(owner, repo, pr_open_since.as_deref())
+        .list_open_prs(owner, repo, pr_open_since)
         .await
         .unwrap_or_default();
 
@@ -916,7 +918,7 @@ async fn fetch_cards(token: &str, owner: &str, repo: &str) -> Vec<Card> {
     // ── Closed PRs (cumulative, no reviews/CI) ──────────────────
     let pr_since = merged_sync_time(owner, repo);
     let new_closed_prs = client
-        .list_closed_prs(owner, repo, pr_since.as_deref())
+        .list_closed_prs(owner, repo, pr_since)
         .await
         .unwrap_or_default();
     if !new_closed_prs.is_empty() {
@@ -936,11 +938,11 @@ async fn fetch_cards(token: &str, owner: &str, repo: &str) -> Vec<Card> {
     // ── Map to cards ──────────────────────────────────────────────
     let mut cards: Vec<Card> = all_issues
         .into_iter()
-        .map(|i| map_card(CardSource::Issue(i), &config))
+        .map(|i| map_card(owner, repo, CardSource::Issue(i), &config))
         .chain(
             all_prs
                 .into_iter()
-                .map(|p| map_card(CardSource::PullRequest(p), &config)),
+                .map(|p| map_card(owner, repo, CardSource::PullRequest(p), &config)),
         )
         .collect();
 

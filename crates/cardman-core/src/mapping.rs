@@ -215,13 +215,15 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
 }
 
 /// Map a card source to its column and priority, producing a full [`Card`].
-pub fn map_card(source: CardSource, config: &MappingConfig) -> Card {
+pub fn map_card(owner: &str, repo: &str, source: CardSource, config: &MappingConfig) -> Card {
     let (column_kind, labels) = match &source {
         CardSource::Issue(issue) => (map_issue(issue), &issue.labels),
         CardSource::PullRequest(pr) => (map_pull_request(pr, config), &pr.labels),
     };
 
     Card {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
         priority: extract_priority(labels),
         column: column_kind.to_column(),
         source,
@@ -268,6 +270,7 @@ mod tests {
         PullRequest {
             number: 10,
             title: "Test PR".to_string(),
+            body: None,
             draft: false,
             author: user("author"),
             assignees: vec![],
@@ -286,7 +289,7 @@ mod tests {
     #[test]
     fn issue_no_labels_maps_to_prebacklog() {
         let issue = base_issue();
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Prebacklog");
         assert!(card.priority.is_none());
     }
@@ -295,7 +298,7 @@ mod tests {
     fn issue_priority_6_maps_to_icebox() {
         let mut issue = base_issue();
         issue.labels = vec![label("#6")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Icebox");
         assert_eq!(card.priority, Some(Priority(6)));
     }
@@ -304,7 +307,7 @@ mod tests {
     fn issue_priority_4_maps_to_prebacklog() {
         let mut issue = base_issue();
         issue.labels = vec![label("#4")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Prebacklog");
     }
 
@@ -312,7 +315,7 @@ mod tests {
     fn issue_priority_5_maps_to_prebacklog() {
         let mut issue = base_issue();
         issue.labels = vec![label("#5")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Prebacklog");
     }
 
@@ -320,7 +323,7 @@ mod tests {
     fn issue_priority_1_maps_to_backlog() {
         let mut issue = base_issue();
         issue.labels = vec![label("#1")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Backlog");
         assert_eq!(card.priority, Some(Priority(1)));
     }
@@ -329,7 +332,7 @@ mod tests {
     fn issue_priority_2_maps_to_backlog() {
         let mut issue = base_issue();
         issue.labels = vec![label("#2")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Backlog");
     }
 
@@ -337,7 +340,7 @@ mod tests {
     fn issue_priority_3_maps_to_backlog() {
         let mut issue = base_issue();
         issue.labels = vec![label("#3")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Backlog");
     }
 
@@ -345,7 +348,7 @@ mod tests {
     fn issue_multiple_priorities_uses_highest() {
         let mut issue = base_issue();
         issue.labels = vec![label("#3"), label("#1"), label("#5")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         // Highest priority (#1) determines column
         assert_eq!(card.column.name, "Backlog");
         assert_eq!(card.priority, Some(Priority(1)));
@@ -356,7 +359,7 @@ mod tests {
     #[test]
     fn pr_open_no_reviewers_maps_to_in_progress() {
         let pr = base_pr();
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Progress");
     }
 
@@ -364,7 +367,7 @@ mod tests {
     fn pr_with_reviewers_no_failure_maps_to_code_review() {
         let mut pr = base_pr();
         pr.requested_reviewers = vec![user("reviewer1")];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Code review");
     }
 
@@ -373,7 +376,7 @@ mod tests {
         let mut pr = base_pr();
         pr.ci_status = CiStatus::Failure;
         pr.requested_reviewers = vec![user("reviewer1")];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Progress");
     }
 
@@ -390,7 +393,7 @@ mod tests {
                 state: ReviewState::Approved,
             },
         ];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "QA Backlog");
     }
 
@@ -405,7 +408,7 @@ mod tests {
             required_approvals: 1,
             ..default_config()
         };
-        let card = map_card(CardSource::PullRequest(pr), &config);
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &config);
         assert_eq!(card.column.name, "QA Backlog");
     }
 
@@ -413,7 +416,7 @@ mod tests {
     fn pr_with_qa_label_maps_to_qa_review() {
         let mut pr = base_pr();
         pr.labels = vec![label("QA")];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "QA Review");
     }
 
@@ -428,7 +431,7 @@ mod tests {
             user: user("qa-bot"),
             state: ReviewState::Approved,
         }];
-        let card = map_card(CardSource::PullRequest(pr), &config);
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &config);
         assert_eq!(card.column.name, "Ready for STG");
     }
 
@@ -436,7 +439,7 @@ mod tests {
     fn pr_merged_maps_to_ready_for_deploy() {
         let mut pr = base_pr();
         pr.merged = true;
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Ready for deploy");
     }
 
@@ -444,7 +447,7 @@ mod tests {
     fn pr_in_release_branch_maps_to_in_release() {
         let mut pr = base_pr();
         pr.branch = "release/v1.0".to_string();
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Release");
     }
 
@@ -461,7 +464,7 @@ mod tests {
                 state: ReviewState::Pending,
             },
         ];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Progress");
     }
 
@@ -471,7 +474,7 @@ mod tests {
     fn issue_qa_failed_maps_to_failed() {
         let mut issue = base_issue();
         issue.labels = vec![label("QA-Failed")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Failed");
     }
 
@@ -479,7 +482,7 @@ mod tests {
     fn issue_qa_ok_maps_to_ready_for_stg() {
         let mut issue = base_issue();
         issue.labels = vec![label("QA-OK")];
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Ready for STG");
     }
 
@@ -487,7 +490,7 @@ mod tests {
     fn pr_qa_failed_label_maps_to_failed() {
         let mut pr = base_pr();
         pr.labels = vec![label("QA-Failed")];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Failed");
     }
 
@@ -495,7 +498,7 @@ mod tests {
     fn pr_qa_ok_label_maps_to_ready_for_stg() {
         let mut pr = base_pr();
         pr.labels = vec![label("QA-OK")];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Ready for STG");
     }
 
@@ -503,7 +506,7 @@ mod tests {
     fn pr_draft_without_reviewers_stays_in_progress() {
         let mut pr = base_pr();
         pr.draft = true;
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Progress");
     }
 
@@ -512,7 +515,7 @@ mod tests {
         let mut pr = base_pr();
         pr.draft = true;
         pr.requested_reviewers = vec![user("reviewer1")];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Failed");
     }
 
@@ -524,7 +527,7 @@ mod tests {
             user: user("reviewer1"),
             state: ReviewState::ChangesRequested,
         }];
-        let card = map_card(CardSource::PullRequest(pr), &default_config());
+        let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Failed");
     }
 
@@ -532,7 +535,7 @@ mod tests {
     fn closed_issue_maps_to_closed() {
         let mut issue = base_issue();
         issue.state = IssueState::Closed;
-        let card = map_card(CardSource::Issue(issue), &default_config());
+        let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
         assert_eq!(card.column.name, "Closed");
     }
 }
