@@ -21,6 +21,12 @@ pub struct CardDetailProps {
     pub token: String,
     /// Authenticated user login (for edit permissions).
     pub user_login: String,
+    /// Member `(login, display_name)` pairs for `@` autocomplete.
+    #[props(default = Vec::new())]
+    pub members: Vec<(String, Option<String>)>,
+    /// Card `(number, title)` pairs for `#` autocomplete.
+    #[props(default = Vec::new())]
+    pub cards: Vec<(u64, String)>,
     /// Callback to close the panel.
     pub on_close: EventHandler<()>,
 }
@@ -34,6 +40,8 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let user_login = props.user_login.clone();
     let owner = card.owner.clone();
     let repo = card.repo.clone();
+    let members_ac = props.members.clone();
+    let cards_ac = props.cards.clone();
 
     // Extract common fields from the card source.
     let (number, title, body_md, labels, assignees, state_label, state_class) = match &card.source {
@@ -94,7 +102,7 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let body_html = if body_md.is_empty() {
         String::new()
     } else {
-        markdown_to_html(body_md)
+        markdown_to_html(body_md, &owner, &repo)
     };
 
     // GitHub URL for this issue/PR.
@@ -291,6 +299,10 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                         MarkdownEditor {
                             value: body_draft(),
                             placeholder: "Describe the issue…",
+                            owner: owner.clone(),
+                            repo: repo.clone(),
+                            members: members_ac.clone(),
+                            cards: cards_ac.clone(),
                             on_change: move |v: String| body_draft.set(v),
                         }
                         div { class: "detail-edit-actions",
@@ -387,6 +399,10 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                                                         MarkdownEditor {
                                                             value: comment_edit_text(),
                                                             placeholder: "Edit comment…",
+                                                            owner: owner.clone(),
+                                                            repo: repo.clone(),
+                                                            members: members_ac.clone(),
+                                                            cards: cards_ac.clone(),
                                                             on_change: move |v: String| comment_edit_text.set(v),
                                                         }
                                                         div { class: "detail-edit-actions",
@@ -424,7 +440,7 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                                                 } else {
                                                     div {
                                                         class: "detail-comment-body detail-markdown",
-                                                        dangerous_inner_html: "{markdown_to_html(&comment.body)}",
+                                                        dangerous_inner_html: "{markdown_to_html(&comment.body, &owner, &repo)}",
                                                     }
                                                 }
                                             }
@@ -440,6 +456,10 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                                 MarkdownEditor {
                                     value: new_comment_text(),
                                     placeholder: "Add a comment…",
+                                    owner: owner.clone(),
+                                    repo: repo.clone(),
+                                    members: members_ac.clone(),
+                                    cards: cards_ac.clone(),
                                     on_change: move |v: String| new_comment_text.set(v),
                                 }
                                 div { class: "detail-edit-actions",

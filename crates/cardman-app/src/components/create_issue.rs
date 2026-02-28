@@ -1,4 +1,7 @@
 //! Create issue modal triggered from the board toolbar.
+//!
+//! Provides a repo dropdown (when multiple repos are available), title
+//! input, markdown body editor with autocomplete, and create/cancel actions.
 
 use cardman_core::github::RestClient;
 use dioxus::prelude::*;
@@ -12,8 +15,14 @@ pub struct CreateIssueProps {
     pub token: String,
     /// Repository owner.
     pub owner: String,
-    /// Repository name.
-    pub repo: String,
+    /// Available repository names to create the issue in.
+    pub repos: Vec<String>,
+    /// Member `(login, display_name)` pairs for `@` autocomplete.
+    #[props(default = Vec::new())]
+    pub members: Vec<(String, Option<String>)>,
+    /// Card `(number, title)` pairs for `#` autocomplete.
+    #[props(default = Vec::new())]
+    pub cards: Vec<(u64, String)>,
     /// Callback when issue is created (triggers board refresh).
     pub on_created: EventHandler<()>,
     /// Callback to close the modal.
@@ -29,10 +38,13 @@ pub fn CreateIssue(props: CreateIssueProps) -> Element {
     let mut body = use_signal(String::new);
     let mut saving = use_signal(|| false);
     let mut error_msg: Signal<Option<String>> = use_signal(|| None);
+    let mut selected_repo = use_signal(|| props.repos.first().cloned().unwrap_or_default());
 
     let token = props.token.clone();
     let owner = props.owner.clone();
-    let repo = props.repo.clone();
+    let repos = props.repos.clone();
+    let members = props.members.clone();
+    let cards = props.cards.clone();
 
     let can_save = !title().trim().is_empty() && !saving();
 
@@ -55,6 +67,21 @@ pub fn CreateIssue(props: CreateIssueProps) -> Element {
             }
 
             div { class: "modal-body",
+                // Repo selector (only when multiple repos available)
+                if repos.len() > 1 {
+                    div { class: "modal-field",
+                        label { class: "modal-label", "Repository" }
+                        select {
+                            class: "modal-select",
+                            value: "{selected_repo}",
+                            onchange: move |e| selected_repo.set(e.value()),
+                            for repo_name in &repos {
+                                option { value: "{repo_name}", "{repo_name}" }
+                            }
+                        }
+                    }
+                }
+
                 // Title
                 div { class: "modal-field",
                     label { class: "modal-label", "Title" }
@@ -67,12 +94,16 @@ pub fn CreateIssue(props: CreateIssueProps) -> Element {
                     }
                 }
 
-                // Body (markdown editor)
+                // Body (markdown editor with autocomplete)
                 div { class: "modal-field",
                     label { class: "modal-label", "Description" }
                     MarkdownEditor {
                         value: body(),
                         placeholder: "Describe the issue…",
+                        owner: owner.clone(),
+                        repo: selected_repo(),
+                        members: members.clone(),
+                        cards: cards.clone(),
                         on_change: move |v: String| body.set(v),
                     }
                 }
@@ -95,7 +126,7 @@ pub fn CreateIssue(props: CreateIssueProps) -> Element {
                     onclick: move |_| {
                         let token = token.clone();
                         let owner = owner.clone();
-                        let repo = repo.clone();
+                        let repo = selected_repo().clone();
                         let title_val = title().trim().to_string();
                         let body_val = body().trim().to_string();
                         let body_opt: Option<String> = if body_val.is_empty() { None } else { Some(body_val) };

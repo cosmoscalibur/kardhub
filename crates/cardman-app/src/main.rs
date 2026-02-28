@@ -9,10 +9,10 @@ mod components;
 use cache::{
     AppSettings, cached_card_count, clear_all_cache, closed_sync_time, is_cards_fresh,
     is_members_fresh, is_repos_fresh, is_sources_fresh, load_cards, load_closed_issues,
-    load_merged_prs, load_open_issues, load_prs, load_repos, load_settings, load_sources,
-    merged_sync_time, open_sync_time, prs_sync_time, save_cards, save_closed_issues, save_members,
-    save_merged_prs, save_open_issues, save_prs, save_repos, save_settings, save_sources,
-    source_key,
+    load_members, load_merged_prs, load_open_issues, load_prs, load_repos, load_settings,
+    load_sources, merged_sync_time, open_sync_time, prs_sync_time, save_cards, save_closed_issues,
+    save_members, save_merged_prs, save_open_issues, save_prs, save_repos, save_settings,
+    save_sources, source_key,
 };
 use cardman_core::github::RestClient;
 use cardman_core::mapping::{MappingConfig, map_card};
@@ -251,6 +251,27 @@ fn app() -> Element {
                 None
             };
             let default_repo = app_settings().default_repos.get(&sk).cloned();
+            let cards_for_ac = cards.clone();
+            // Members for autocomplete (from cache, org only).
+            let members_ac: Vec<(String, Option<String>)> = match &source {
+                SourceKind::Organization(org) => load_members(org)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|u| (u.login, u.name))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            // Cards for # autocomplete.
+            let cards_ac: Vec<(u64, String)> = cards_for_ac
+                .iter()
+                .map(|c| {
+                    let (num, title) = match &c.source {
+                        CardSource::Issue(i) => (i.number, i.title.clone()),
+                        CardSource::PullRequest(pr) => (pr.number, pr.title.clone()),
+                    };
+                    (num, title)
+                })
+                .collect();
 
             // Pre-clone for closures
             let token_for_toggle = token.clone();
@@ -571,6 +592,8 @@ fn app() -> Element {
                                 card: card,
                                 token: token.clone(),
                                 user_login: user.login.clone(),
+                                members: members_ac.clone(),
+                                cards: cards_ac.clone(),
                                 on_close: move |_| {
                                     selected_card.set(None);
                                 },
@@ -581,11 +604,12 @@ fn app() -> Element {
                         if show_create_issue() {
                             {
                                 let owner_ci = owner_for_source(&source, &user.login);
-                                let repos_ci = repos.clone();
                                 let selected_ci = selected_repos.clone();
-                                let repo_ci = selected_ci.first()
-                                    .and_then(|&i| repos_ci.get(i).cloned())
-                                    .unwrap_or_default();
+                                // Build repos list from selected indices.
+                                let repos_list: Vec<String> = selected_ci
+                                    .iter()
+                                    .filter_map(|&i| repos.get(i).cloned())
+                                    .collect();
                                 let token_ci = token.clone();
                                 let source_refresh = source.clone();
                                 let user_refresh = user.clone();
@@ -596,7 +620,9 @@ fn app() -> Element {
                                     CreateIssue {
                                         token: token_ci,
                                         owner: owner_ci.clone(),
-                                        repo: repo_ci,
+                                        repos: repos_list,
+                                        members: members_ac,
+                                        cards: cards_ac,
                                         on_close: move |_| {
                                             show_create_issue.set(false);
                                         },

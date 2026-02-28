@@ -1537,3 +1537,63 @@ select {
   border-radius: var(--radius);
   background: var(--bg-secondary);
 }
+
+/* ── Editor wrapper (for autocomplete positioning) ──────────────── */
+
+.md-editor-wrap {
+  position: relative;
+}
+
+/* ── Autocomplete popup ─────────────────────────────────────────── */
+
+.md-autocomplete {
+  position: absolute;
+  bottom: 0;
+  left: 12px;
+  z-index: 50;
+  min-width: 200px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 4px 0;
+}
+
+.md-ac-item {
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+  transition: background var(--transition);
+}
+
+.md-ac-item:hover,
+.md-ac-item.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Modal select (repo dropdown) ───────────────────────────────── */
+
+.modal-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 14px;
+  box-sizing: border-box;
+  appearance: none;
+  cursor: pointer;
+}
+
+.modal-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
