@@ -20,9 +20,9 @@ pub struct MarkdownEditorProps {
     /// Repository name (for auto-linking in preview).
     #[props(default = String::new())]
     pub repo: String,
-    /// Member `(login, display_name)` pairs for `@` autocomplete.
+    /// Member logins for `@` autocomplete.
     #[props(default = Vec::new())]
-    pub members: Vec<(String, Option<String>)>,
+    pub members: Vec<String>,
     /// Card `(number, title)` pairs for `#` autocomplete.
     #[props(default = Vec::new())]
     pub cards: Vec<(u64, String)>,
@@ -61,7 +61,7 @@ pub fn MarkdownEditor(props: MarkdownEditorProps) -> Element {
             let query_end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
             let after = &value[trigger_pos + query_end..];
             let replacement = match item {
-                AcItem::Member(login, _) => format!("@{login} "),
+                AcItem::Member(login) => format!("@{login} "),
                 AcItem::Card(num, _) => format!("#{num} "),
             };
             let new_value = format!("{before}{replacement}{after}");
@@ -162,12 +162,7 @@ pub fn MarkdownEditor(props: MarkdownEditorProps) -> Element {
                                 {
                                     let is_active = i == ac_index();
                                     let label = match item {
-                                        AcItem::Member(login, name) => {
-                                            match name {
-                                                Some(n) => format!("@{login} ({n})"),
-                                                None => format!("@{login}"),
-                                            }
-                                        }
+                                        AcItem::Member(login) => format!("@{login}"),
                                         AcItem::Card(num, title) => format!("#{num} {title}"),
                                     };
                                     let item_clone = item.clone();
@@ -198,8 +193,8 @@ pub fn MarkdownEditor(props: MarkdownEditorProps) -> Element {
 /// Autocomplete item variants.
 #[derive(Clone, Debug, PartialEq)]
 enum AcItem {
-    /// A user login and optional display name.
-    Member(String, Option<String>),
+    /// A user login.
+    Member(String),
     /// An issue/PR number and title.
     Card(u64, String),
 }
@@ -207,7 +202,7 @@ enum AcItem {
 /// Detect `@` or `#` trigger in the text and populate autocomplete items.
 fn update_autocomplete(
     text: &str,
-    members: &[(String, Option<String>)],
+    members: &[String],
     cards: &[(u64, String)],
     visible: &mut Signal<bool>,
     items: &mut Signal<Vec<AcItem>>,
@@ -269,14 +264,9 @@ fn update_autocomplete(
             }
             members
                 .iter()
-                .filter(|(login, name)| {
-                    login.to_lowercase().starts_with(&query_lower)
-                        || name
-                            .as_ref()
-                            .is_some_and(|n| n.to_lowercase().starts_with(&query_lower))
-                })
+                .filter(|login| login.to_lowercase().starts_with(&query_lower))
                 .take(MAX_SUGGESTIONS)
-                .map(|(login, name)| AcItem::Member(login.clone(), name.clone()))
+                .map(|login| AcItem::Member(login.clone()))
                 .collect()
         }
         '#' => {

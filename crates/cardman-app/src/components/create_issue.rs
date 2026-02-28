@@ -17,9 +17,9 @@ pub struct CreateIssueProps {
     pub owner: String,
     /// Available repository names to create the issue in.
     pub repos: Vec<String>,
-    /// Member `(login, display_name)` pairs for `@` autocomplete.
+    /// Member logins for `@` autocomplete.
     #[props(default = Vec::new())]
-    pub members: Vec<(String, Option<String>)>,
+    pub members: Vec<String>,
     /// Card `(number, title)` pairs for `#` autocomplete.
     #[props(default = Vec::new())]
     pub cards: Vec<(u64, String)>,

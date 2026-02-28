@@ -6,6 +6,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Provide a default `DateTime<Utc>` (Unix epoch) for serde.
+fn epoch_default() -> DateTime<Utc> {
+    DateTime::UNIX_EPOCH
+}
+
 /// A GitHub user.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
@@ -13,7 +18,16 @@ pub struct User {
     pub login: String,
     /// URL to the user's avatar image.
     pub avatar_url: String,
-    /// Display name (may be empty).
+}
+
+/// The authenticated GitHub user (includes display name).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthenticatedUser {
+    /// GitHub login (username).
+    pub login: String,
+    /// URL to the user's avatar image.
+    pub avatar_url: String,
+    /// Display name (may differ from login).
     pub name: Option<String>,
 }
 
@@ -60,12 +74,18 @@ pub struct Issue {
     pub body: Option<String>,
     /// Labels attached to this issue.
     pub labels: Vec<Label>,
-    /// Users assigned to this issue.
-    pub assignees: Vec<User>,
+    /// Logins of users assigned to this issue.
+    pub assignees: Vec<String>,
     /// Current state.
     pub state: IssueState,
     /// Sub-issue numbers (for epics).
     pub sub_issues: Vec<u64>,
+    /// Issue author login.
+    #[serde(default)]
+    pub author: String,
+    /// Timestamp of last update.
+    #[serde(default = "epoch_default")]
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Review verdict on a pull request.
@@ -133,15 +153,15 @@ pub struct PullRequest {
     /// Whether this PR is a draft.
     #[serde(default)]
     pub draft: bool,
-    /// PR author (includes avatar URL for display).
+    /// PR author login.
     #[serde(default)]
-    pub author: User,
-    /// Assigned users (includes avatar URLs for display).
+    pub author: String,
+    /// Logins of assigned users.
     #[serde(default)]
-    pub assignees: Vec<User>,
-    /// Users requested to review this PR (drives Code Review column).
+    pub assignees: Vec<String>,
+    /// Logins of users requested to review this PR.
     #[serde(default)]
-    pub requested_reviewers: Vec<User>,
+    pub requested_reviewers: Vec<String>,
     /// Reviews submitted on this PR.
     pub reviews: Vec<Review>,
     /// Aggregated CI status.
@@ -155,6 +175,9 @@ pub struct PullRequest {
     pub branch: String,
     /// Labels attached to this PR.
     pub labels: Vec<Label>,
+    /// Timestamp of last update.
+    #[serde(default = "epoch_default")]
+    pub updated_at: DateTime<Utc>,
 }
 
 /// A GitHub organization.
@@ -256,7 +279,6 @@ mod tests {
         let user = User {
             login: "octocat".to_string(),
             avatar_url: "https://example.com/avatar.png".to_string(),
-            name: Some("Mona Lisa".to_string()),
         };
         let json = serde_json::to_string(&user).unwrap();
         let deserialized: User = serde_json::from_str(&json).unwrap();

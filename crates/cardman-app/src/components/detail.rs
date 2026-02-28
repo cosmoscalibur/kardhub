@@ -21,9 +21,9 @@ pub struct CardDetailProps {
     pub token: String,
     /// Authenticated user login (for edit permissions).
     pub user_login: String,
-    /// Member `(login, display_name)` pairs for `@` autocomplete.
+    /// Cached members for resolving login → avatar.
     #[props(default = Vec::new())]
-    pub members: Vec<(String, Option<String>)>,
+    pub members: Vec<User>,
     /// Card `(number, title)` pairs for `#` autocomplete.
     #[props(default = Vec::new())]
     pub cards: Vec<(u64, String)>,
@@ -40,45 +40,50 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let user_login = props.user_login.clone();
     let owner = card.owner.clone();
     let repo = card.repo.clone();
-    let members_ac = props.members.clone();
+    let members_list = props.members.clone();
     let cards_ac = props.cards.clone();
+    // Login strings for autocomplete.
+    let members_ac: Vec<String> = members_list.iter().map(|u| u.login.clone()).collect();
 
     // Extract common fields from the card source.
-    let (number, title, body_md, labels, assignees, state_label, state_class) = match &card.source {
-        CardSource::Issue(issue) => {
-            let (sl, sc) = match issue.state {
-                IssueState::Open => ("Open", "open"),
-                IssueState::Closed => ("Closed", "closed"),
-            };
-            (
-                issue.number,
-                issue.title.as_str(),
-                issue.body.as_deref().unwrap_or(""),
-                issue.labels.as_slice(),
-                issue.assignees.as_slice(),
-                sl,
-                sc,
-            )
-        }
-        CardSource::PullRequest(pr) => {
-            let (sl, sc) = if pr.merged {
-                ("Merged", "merged")
-            } else if pr.closed {
-                ("Closed", "closed")
-            } else {
-                ("Open", "open")
-            };
-            (
-                pr.number,
-                pr.title.as_str(),
-                pr.body.as_deref().unwrap_or(""),
-                pr.labels.as_slice(),
-                pr.assignees.as_slice(),
-                sl,
-                sc,
-            )
-        }
-    };
+    let (number, title, body_md, labels, assignee_logins, author, state_label, state_class) =
+        match &card.source {
+            CardSource::Issue(issue) => {
+                let (sl, sc) = match issue.state {
+                    IssueState::Open => ("Open", "open"),
+                    IssueState::Closed => ("Closed", "closed"),
+                };
+                (
+                    issue.number,
+                    issue.title.as_str(),
+                    issue.body.as_deref().unwrap_or(""),
+                    issue.labels.as_slice(),
+                    issue.assignees.as_slice(),
+                    issue.author.as_str(),
+                    sl,
+                    sc,
+                )
+            }
+            CardSource::PullRequest(pr) => {
+                let (sl, sc) = if pr.merged {
+                    ("Merged", "merged")
+                } else if pr.closed {
+                    ("Closed", "closed")
+                } else {
+                    ("Open", "open")
+                };
+                (
+                    pr.number,
+                    pr.title.as_str(),
+                    pr.body.as_deref().unwrap_or(""),
+                    pr.labels.as_slice(),
+                    pr.assignees.as_slice(),
+                    pr.author.as_str(),
+                    sl,
+                    sc,
+                )
+            }
+        };
 
     let is_pr = matches!(&card.source, CardSource::PullRequest(_));
     let type_label = if is_pr { "Pull Request" } else { "Issue" };
@@ -94,7 +99,7 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
         && match &card.source {
             CardSource::Issue(_) => true,
             CardSource::PullRequest(pr) => {
-                pr.author.login == user_login || pr.assignees.iter().any(|a| a.login == user_login)
+                pr.author == user_login || pr.assignees.contains(&user_login)
             }
         };
 
@@ -217,6 +222,12 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                     span { class: "detail-state {state_class}", "{state_label}" }
                 }
 
+                // Author
+                div { class: "detail-section",
+                    div { class: "detail-section-title", "Author" }
+                    {render_user_badge(&resolve_login(author, &members_list))}
+                }
+
                 // Priority
                 if let Some(priority) = &card.priority {
                     div { class: "detail-section",
@@ -242,12 +253,12 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                 }
 
                 // Assignees
-                if !assignees.is_empty() {
+                if !assignee_logins.is_empty() {
                     div { class: "detail-section",
                         div { class: "detail-section-title", "Assignees" }
                         div { class: "detail-assignees",
-                            for assignee in assignees {
-                                {render_user_badge(assignee)}
+                            for login in assignee_logins {
+                                {render_user_badge(&resolve_login(login, &members_list))}
                             }
                         }
                     }
@@ -259,8 +270,8 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                         div { class: "detail-section",
                             div { class: "detail-section-title", "Reviewers" }
                             div { class: "detail-reviewers",
-                                for reviewer in &pr.requested_reviewers {
-                                    {render_reviewer_badge(reviewer, &pr.reviews)}
+                                for reviewer_login in &pr.requested_reviewers {
+                                    {render_reviewer_badge(reviewer_login, &pr.reviews, &members_list)}
                                 }
                             }
                         }
@@ -516,11 +527,27 @@ fn render_user_badge(user: &User) -> Element {
     }
 }
 
+/// Resolve a login string to a `User` from the members list.
+fn resolve_login(login: &str, members: &[User]) -> User {
+    members
+        .iter()
+        .find(|u| u.login == login)
+        .cloned()
+        .unwrap_or_else(|| User {
+            login: login.to_string(),
+            avatar_url: String::new(),
+        })
+}
+
 /// Render a reviewer badge with approval status from reviews.
-fn render_reviewer_badge(reviewer: &User, reviews: &[cardman_core::models::Review]) -> Element {
+fn render_reviewer_badge(
+    login: &str,
+    reviews: &[cardman_core::models::Review],
+    members: &[User],
+) -> Element {
     let status = reviews
         .iter()
-        .filter(|r| r.user.login == reviewer.login)
+        .filter(|r| r.user.login == login)
         .next_back()
         .map(|r| &r.state);
 
@@ -531,9 +558,10 @@ fn render_reviewer_badge(reviewer: &User, reviews: &[cardman_core::models::Revie
         _ => ("⏳", "reviewer-pending"),
     };
 
+    let user = resolve_login(login, members);
     rsx! {
         span { class: "detail-reviewer {class}",
-            {render_user_badge(reviewer)}
+            {render_user_badge(&user)}
             span { class: "reviewer-status", "{icon}" }
         }
     }

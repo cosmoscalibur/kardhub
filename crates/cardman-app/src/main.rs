@@ -16,7 +16,7 @@ use cache::{
 };
 use cardman_core::github::RestClient;
 use cardman_core::mapping::{MappingConfig, map_card};
-use cardman_core::models::{Card, CardSource, User};
+use cardman_core::models::{AuthenticatedUser, Card, CardSource, User};
 use components::board::Board;
 use components::create_issue::CreateIssue;
 use components::detail::CardDetail;
@@ -35,7 +35,7 @@ enum AppState {
     Loading,
     /// Authenticated, show the dashboard.
     Dashboard {
-        user: User,
+        user: AuthenticatedUser,
         token: String,
         orgs: Vec<String>,
         source: SourceKind,
@@ -252,15 +252,22 @@ fn app() -> Element {
             };
             let default_repo = app_settings().default_repos.get(&sk).cloned();
             let cards_for_ac = cards.clone();
-            // Members for autocomplete (from cache, org only).
-            let members_ac: Vec<(String, Option<String>)> = match &source {
-                SourceKind::Organization(org) => load_members(org)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|u| (u.login, u.name))
-                    .collect(),
+            // Full members list for avatar resolution.
+            // Always include the authenticated user; org sources add cached members.
+            let auth_as_user = User {
+                login: user.login.clone(),
+                avatar_url: user.avatar_url.clone(),
+            };
+            let mut members_full: Vec<User> = match &source {
+                SourceKind::Organization(org) => load_members(org).unwrap_or_default(),
                 _ => Vec::new(),
             };
+            if !members_full.iter().any(|m| m.login == auth_as_user.login) {
+                members_full.push(auth_as_user);
+            }
+            // Login strings for autocomplete.
+            let members_logins: Vec<String> =
+                members_full.iter().map(|u| u.login.clone()).collect();
             // Cards for # autocomplete.
             let cards_ac: Vec<(u64, String)> = cards_for_ac
                 .iter()
@@ -584,6 +591,7 @@ fn app() -> Element {
                             on_create: move |_| {
                                 show_create_issue.set(true);
                             },
+                            members: members_full.clone(),
                         }
 
                         // Card detail panel
@@ -592,7 +600,7 @@ fn app() -> Element {
                                 card: card,
                                 token: token.clone(),
                                 user_login: user.login.clone(),
-                                members: members_ac.clone(),
+                                members: members_full.clone(),
                                 cards: cards_ac.clone(),
                                 on_close: move |_| {
                                     selected_card.set(None);
@@ -621,7 +629,7 @@ fn app() -> Element {
                                         token: token_ci,
                                         owner: owner_ci.clone(),
                                         repos: repos_list,
-                                        members: members_ac,
+                                        members: members_logins,
                                         cards: cards_ac,
                                         on_close: move |_| {
                                             show_create_issue.set(false);
@@ -860,6 +868,14 @@ async fn authenticate_and_load(token: String) -> Result<AppState, String> {
         fetched
     };
 
+    // Fetch members when restoring an org source (if not cached)
+    if let SourceKind::Organization(ref org) = source
+        && !is_members_fresh(org)
+        && let Ok(members) = client.list_members(org).await
+    {
+        save_members(org, &members);
+    }
+
     // Restore last selected repos
     let selected_repos: Vec<usize> = settings
         .last_repos
@@ -867,14 +883,22 @@ async fn authenticate_and_load(token: String) -> Result<AppState, String> {
         .filter_map(|name| repos.iter().position(|r| r == name))
         .collect();
 
-    // Load cached cards for selected repos
+    // Load cached cards for selected repos; re-fetch inline if cache is
+    // missing or corrupt (seamless cache migration).
     let owner = owner_for_source(&source, &user_login);
     let mut cards = Vec::new();
     for &idx in &selected_repos {
-        if let Some(repo_name) = repos.get(idx)
-            && let Some(cached) = load_cards(&owner, repo_name)
-        {
-            cards.extend(cached);
+        if let Some(repo_name) = repos.get(idx) {
+            let repo_cards = match load_cards(&owner, repo_name) {
+                Some(cached) => cached,
+                None => {
+                    // Cache miss (corrupt/missing) → fetch immediately
+                    let fetched = fetch_cards(&token, &owner, repo_name).await;
+                    save_cards(&owner, repo_name, &fetched);
+                    fetched
+                }
+            };
+            cards.extend(repo_cards);
         }
     }
     cards.sort_by(|a, b| a.priority.cmp(&b.priority));

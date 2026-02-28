@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::models::{
-    CiStatus, Comment, Issue, IssueState, Label, Organization, PullRequest, Repository, Review,
-    ReviewState, User,
+    AuthenticatedUser, CiStatus, Comment, Issue, IssueState, Label, Organization, PullRequest,
+    Repository, Review, ReviewState, User,
 };
 
 /// Errors that may occur when interacting with the GitHub API.
@@ -51,11 +51,27 @@ impl std::error::Error for GitHubError {}
 struct GhUser {
     login: String,
     avatar_url: String,
-    name: Option<String>,
 }
 
 impl From<GhUser> for User {
     fn from(u: GhUser) -> Self {
+        Self {
+            login: u.login,
+            avatar_url: u.avatar_url,
+        }
+    }
+}
+
+/// GitHub API authenticated user response (includes display name).
+#[derive(Debug, Deserialize)]
+struct GhAuthUser {
+    login: String,
+    avatar_url: String,
+    name: Option<String>,
+}
+
+impl From<GhAuthUser> for AuthenticatedUser {
+    fn from(u: GhAuthUser) -> Self {
         Self {
             login: u.login,
             avatar_url: u.avatar_url,
@@ -114,8 +130,9 @@ struct GhIssue {
     labels: Vec<GhLabel>,
     assignees: Vec<GhUser>,
     state: String,
-    #[allow(dead_code)]
     updated_at: DateTime<Utc>,
+    /// Issue author.
+    user: GhUser,
     /// PR field presence indicates this is actually a PR, not an issue.
     pull_request: Option<serde_json::Value>,
 }
@@ -127,12 +144,14 @@ impl From<GhIssue> for Issue {
             title: i.title,
             body: i.body,
             labels: i.labels.into_iter().map(Into::into).collect(),
-            assignees: i.assignees.into_iter().map(Into::into).collect(),
+            assignees: i.assignees.into_iter().map(|u| u.login).collect(),
             state: match i.state.as_str() {
                 "open" => IssueState::Open,
                 _ => IssueState::Closed,
             },
             sub_issues: Vec::new(),
+            author: i.user.login,
+            updated_at: i.updated_at,
         }
     }
 }
@@ -407,13 +426,13 @@ impl RestClient {
     // ── Public API ───────────────────────────────────────────────────
 
     /// Get the authenticated user.
-    pub async fn get_authenticated_user(&self) -> Result<User, GitHubError> {
+    pub async fn get_authenticated_user(&self) -> Result<AuthenticatedUser, GitHubError> {
         let resp = self
             .get("/user")
             .send()
             .await
             .map_err(|e| GitHubError::Http(e.to_string()))?;
-        let user: GhUser = self.handle_response(resp).await?;
+        let user: GhAuthUser = self.handle_response(resp).await?;
         Ok(user.into())
     }
 
@@ -568,10 +587,10 @@ impl RestClient {
 
         let mut prs = Vec::with_capacity(items.len());
         for item in items {
-            let requested: Vec<User> = item
+            let requested: Vec<String> = item
                 .requested_reviewers
                 .into_iter()
-                .map(Into::into)
+                .map(|u| u.login)
                 .collect();
 
             // Draft or no requested reviewers → skip reviews & CI
@@ -582,10 +601,7 @@ impl RestClient {
                     .get_reviews(owner, repo, item.number)
                     .await
                     .unwrap_or_default();
-                // Skip CI when changes requested (PR needs rework)
-                let has_changes_requested =
-                    r.iter().any(|rv| rv.state == ReviewState::ChangesRequested);
-                let ci = if has_changes_requested {
+                let ci = if r.is_empty() {
                     CiStatus::Pending
                 } else {
                     self.get_ci_status(owner, repo, &item.head.branch_ref)
@@ -595,13 +611,22 @@ impl RestClient {
                 (r, ci)
             };
 
+            let author = item.user.login;
+            let assignees: Vec<String> = item.assignees.into_iter().map(|u| u.login).collect();
+            // Fallback: if no explicit assignees, treat author as assignee.
+            let assignees = if assignees.is_empty() {
+                vec![author.clone()]
+            } else {
+                assignees
+            };
+
             prs.push(PullRequest {
                 number: item.number,
                 title: item.title,
                 body: item.body,
                 draft: item.draft,
-                author: item.user.into(),
-                assignees: item.assignees.into_iter().map(Into::into).collect(),
+                author,
+                assignees,
                 requested_reviewers: requested,
                 reviews,
                 ci_status: ci,
@@ -609,6 +634,7 @@ impl RestClient {
                 closed: false,
                 branch: item.head.branch_ref,
                 labels: item.labels.into_iter().map(Into::into).collect(),
+                updated_at: item.updated_at,
             });
         }
         Ok(prs)
@@ -653,13 +679,20 @@ impl RestClient {
             .into_iter()
             .map(|item| {
                 let merged = item.merged_at.is_some();
+                let author = item.user.login;
+                let assignees: Vec<String> = item.assignees.into_iter().map(|u| u.login).collect();
+                let assignees = if assignees.is_empty() {
+                    vec![author.clone()]
+                } else {
+                    assignees
+                };
                 PullRequest {
                     number: item.number,
                     title: item.title,
                     body: None, // Closed PRs: no body cached
                     draft: false,
-                    author: item.user.into(),
-                    assignees: item.assignees.into_iter().map(Into::into).collect(),
+                    author,
+                    assignees,
                     requested_reviewers: Vec::new(),
                     reviews: Vec::new(),
                     ci_status: CiStatus::Pending,
@@ -667,6 +700,7 @@ impl RestClient {
                     closed: !merged,
                     branch: item.head.branch_ref,
                     labels: item.labels.into_iter().map(Into::into).collect(),
+                    updated_at: item.updated_at,
                 }
             })
             .collect())
@@ -855,11 +889,10 @@ mod tests {
         let gh = GhUser {
             login: "octocat".into(),
             avatar_url: "https://example.com/avatar.png".into(),
-            name: Some("Mona Lisa".into()),
         };
         let user: User = gh.into();
         assert_eq!(user.login, "octocat");
-        assert_eq!(user.name, Some("Mona Lisa".into()));
+        assert_eq!(user.avatar_url, "https://example.com/avatar.png");
     }
 
     #[test]
@@ -888,6 +921,10 @@ mod tests {
             assignees: vec![],
             state: "open".into(),
             updated_at: "2024-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+            user: GhUser {
+                login: "author".into(),
+                avatar_url: String::new(),
+            },
             pull_request: Some(serde_json::json!({})),
         };
         // pull_request field is present, so this should be filtered out when listing issues
@@ -909,7 +946,6 @@ mod tests {
                 user: GhUser {
                     login: "test".into(),
                     avatar_url: String::new(),
-                    name: None,
                 },
                 state: raw.into(),
             };

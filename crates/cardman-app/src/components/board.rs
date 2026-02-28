@@ -1,6 +1,6 @@
 //! Kanban board component rendering columns of cards.
 
-use cardman_core::models::{Card, CardSource, IssueState};
+use cardman_core::models::{Card, CardSource, IssueState, User};
 use dioxus::prelude::*;
 
 use super::card::CardItem;
@@ -36,6 +36,9 @@ pub struct BoardProps {
     pub on_card_click: EventHandler<Card>,
     /// Callback to open the create issue modal.
     pub on_create: EventHandler<()>,
+    /// Cached members for resolving login → avatar.
+    #[props(default = Vec::new())]
+    pub members: Vec<User>,
 }
 
 /// Check if a card is from a closed issue.
@@ -113,6 +116,7 @@ pub fn Board(props: BoardProps) -> Element {
                                             rsx! {
                                                 CardItem {
                                                     card: card.clone(),
+                                                    members: props.members.clone(),
                                                     on_click: move |c: Card| on_card_click.call(c),
                                                 }
                                             }

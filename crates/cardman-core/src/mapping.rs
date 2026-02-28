@@ -234,6 +234,7 @@ pub fn map_card(owner: &str, repo: &str, source: CardSource, config: &MappingCon
 mod tests {
     use super::*;
     use crate::models::{IssueState, Review, User};
+    use chrono::Utc;
 
     fn label(name: &str) -> Label {
         Label {
@@ -246,7 +247,6 @@ mod tests {
         User {
             login: login.to_string(),
             avatar_url: String::new(),
-            name: None,
         }
     }
 
@@ -263,6 +263,8 @@ mod tests {
             assignees: vec![],
             state: IssueState::Open,
             sub_issues: vec![],
+            author: "author".to_string(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -272,7 +274,7 @@ mod tests {
             title: "Test PR".to_string(),
             body: None,
             draft: false,
-            author: user("author"),
+            author: "author".to_string(),
             assignees: vec![],
             requested_reviewers: vec![],
             reviews: vec![],
@@ -281,6 +283,7 @@ mod tests {
             closed: false,
             branch: "feature/test".to_string(),
             labels: vec![],
+            updated_at: Utc::now(),
         }
     }
 
@@ -366,7 +369,7 @@ mod tests {
     #[test]
     fn pr_with_reviewers_no_failure_maps_to_code_review() {
         let mut pr = base_pr();
-        pr.requested_reviewers = vec![user("reviewer1")];
+        pr.requested_reviewers = vec!["reviewer1".to_string()];
         let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Code review");
     }
@@ -375,7 +378,7 @@ mod tests {
     fn pr_with_failed_ci_stays_in_progress() {
         let mut pr = base_pr();
         pr.ci_status = CiStatus::Failure;
-        pr.requested_reviewers = vec![user("reviewer1")];
+        pr.requested_reviewers = vec!["reviewer1".to_string()];
         let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "In Progress");
     }
@@ -514,7 +517,7 @@ mod tests {
     fn pr_draft_with_reviewers_maps_to_failed() {
         let mut pr = base_pr();
         pr.draft = true;
-        pr.requested_reviewers = vec![user("reviewer1")];
+        pr.requested_reviewers = vec!["reviewer1".to_string()];
         let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
         assert_eq!(card.column.name, "Pending");
     }
@@ -522,7 +525,7 @@ mod tests {
     #[test]
     fn pr_changes_requested_maps_to_failed() {
         let mut pr = base_pr();
-        pr.requested_reviewers = vec![user("reviewer1")];
+        pr.requested_reviewers = vec!["reviewer1".to_string()];
         pr.reviews = vec![Review {
             user: user("reviewer1"),
             state: ReviewState::ChangesRequested,

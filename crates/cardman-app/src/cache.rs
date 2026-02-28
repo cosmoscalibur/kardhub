@@ -76,10 +76,19 @@ pub fn source_key(source_name: &str) -> String {
 // ── Generic helpers ──────────────────────────────────────────────────
 
 /// Load a JSON file, returning `None` on any error.
+///
+/// If the file exists but fails to deserialize (corrupt/outdated schema),
+/// the file is deleted so the next sync will re-fetch fresh data.
 fn load_json<T: for<'de> Deserialize<'de>>(name: &str) -> Option<T> {
     let path = cache_dir().join(name);
-    let data = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&data).ok()
+    let data = fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&data) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            let _ = fs::remove_file(&path);
+            None
+        }
+    }
 }
 
 /// Save a value as JSON to a file.

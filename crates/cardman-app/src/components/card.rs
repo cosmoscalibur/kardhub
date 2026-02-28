@@ -1,6 +1,6 @@
 //! Individual card component rendering an issue or pull request.
 
-use cardman_core::models::{Card, CardSource};
+use cardman_core::models::{Card, CardSource, User};
 use dioxus::prelude::*;
 
 /// Render a label with its color as background.
@@ -24,6 +24,9 @@ pub fn label_style(color: &str) -> String {
 pub struct CardItemProps {
     /// The card to render.
     pub card: Card,
+    /// Cached members for resolving login → avatar.
+    #[props(default = Vec::new())]
+    pub members: Vec<User>,
     /// Callback when the card is clicked.
     pub on_click: EventHandler<Card>,
 }
@@ -32,7 +35,7 @@ pub struct CardItemProps {
 #[component]
 pub fn CardItem(props: CardItemProps) -> Element {
     let card = &props.card;
-    let (number, title, labels, users) = match &card.source {
+    let (number, title, labels, logins) = match &card.source {
         CardSource::Issue(issue) => (
             issue.number,
             issue.title.as_str(),
@@ -40,12 +43,31 @@ pub fn CardItem(props: CardItemProps) -> Element {
             issue.assignees.clone(),
         ),
         CardSource::PullRequest(pr) => {
-            // Show author + assignees for PRs
-            let mut users = vec![pr.author.clone()];
-            users.extend(pr.assignees.iter().cloned());
-            (pr.number, pr.title.as_str(), &pr.labels, users)
+            // Fallback: if no explicit assignees, show author.
+            let assignees = if pr.assignees.is_empty() {
+                vec![pr.author.clone()]
+            } else {
+                pr.assignees.clone()
+            };
+            (pr.number, pr.title.as_str(), &pr.labels, assignees)
         }
     };
+
+    // Resolve logins to User (for avatar display) via members cache.
+    let resolved: Vec<User> = logins
+        .iter()
+        .map(|login| {
+            props
+                .members
+                .iter()
+                .find(|m| m.login == *login)
+                .cloned()
+                .unwrap_or_else(|| User {
+                    login: login.clone(),
+                    avatar_url: String::new(),
+                })
+        })
+        .collect();
 
     // Separate priority labels from display labels
     let display_labels: Vec<_> = labels
@@ -89,10 +111,10 @@ pub fn CardItem(props: CardItemProps) -> Element {
                     span { class: "card-priority", "#{priority.0}" }
                 }
 
-                // User avatars (author for PRs, assignees for issues)
-                if !users.is_empty() {
+                // Assignee avatars
+                if !resolved.is_empty() {
                     div { class: "card-assignees",
-                        for u in &users {
+                        for u in &resolved {
                             if u.avatar_url.is_empty() {
                                 span {
                                     class: "card-assignee",
