@@ -10,7 +10,7 @@ const COLUMNS: &[(&str, &str)] = &[
     ("🧊", "Icebox"),
     ("⏳", "Prebacklog"),
     ("📥", "Backlog"),
-    ("❌", "Failed"),
+    ("🔙", "Pending"),
     ("🚧", "In Progress"),
     ("👀", "Code review"),
     ("⏳", "QA Backlog"),

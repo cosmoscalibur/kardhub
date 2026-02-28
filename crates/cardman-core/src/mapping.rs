@@ -53,7 +53,7 @@ impl ColumnKind {
             Self::Icebox => ("Icebox", "🧊", 0),
             Self::Prebacklog => ("Prebacklog", "⏳", 1),
             Self::Backlog => ("Backlog", "📥", 2),
-            Self::Failed => ("Failed", "❌", 3),
+            Self::Failed => ("Pending", "🔙", 3),
             Self::InProgress => ("In Progress", "🚧", 4),
             Self::CodeReview => ("Code review", "👀", 5),
             Self::QaBacklog => ("QA Backlog", "⏳", 6),
@@ -95,7 +95,7 @@ fn map_issue(issue: &Issue) -> ColumnKind {
         return ColumnKind::ReadyForStg;
     }
 
-    // QA-Failed label → ❌ Failed
+    // QA-Failed label → 🔙 Pending
     let has_qa_failed = issue
         .labels
         .iter()
@@ -139,7 +139,7 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
         return ColumnKind::Closed;
     }
 
-    // Draft with requested reviewers → ❌ Failed (should not request review on draft)
+    // Draft with requested reviewers → 🔙 Pending (should not request review on draft)
     // Draft without reviewers → 🚧 In Progress
     if pr.draft {
         if pr.requested_reviewers.is_empty() {
@@ -175,7 +175,7 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
         return ColumnKind::QaReview;
     }
 
-    // Label "QA-Failed" → ❌ Failed
+    // Label "QA-Failed" → 🔙 Pending
     let has_qa_failed = pr
         .labels
         .iter()
@@ -184,7 +184,7 @@ fn map_pull_request(pr: &PullRequest, config: &MappingConfig) -> ColumnKind {
         return ColumnKind::Failed;
     }
 
-    // Review with changes requested → ❌ Failed
+    // Review with changes requested → 🔙 Pending
     let has_changes_requested = pr
         .reviews
         .iter()
@@ -475,7 +475,7 @@ mod tests {
         let mut issue = base_issue();
         issue.labels = vec![label("QA-Failed")];
         let card = map_card("o", "r", CardSource::Issue(issue), &default_config());
-        assert_eq!(card.column.name, "Failed");
+        assert_eq!(card.column.name, "Pending");
     }
 
     #[test]
@@ -491,7 +491,7 @@ mod tests {
         let mut pr = base_pr();
         pr.labels = vec![label("QA-Failed")];
         let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
-        assert_eq!(card.column.name, "Failed");
+        assert_eq!(card.column.name, "Pending");
     }
 
     #[test]
@@ -516,7 +516,7 @@ mod tests {
         pr.draft = true;
         pr.requested_reviewers = vec![user("reviewer1")];
         let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
-        assert_eq!(card.column.name, "Failed");
+        assert_eq!(card.column.name, "Pending");
     }
 
     #[test]
@@ -528,7 +528,7 @@ mod tests {
             state: ReviewState::ChangesRequested,
         }];
         let card = map_card("o", "r", CardSource::PullRequest(pr), &default_config());
-        assert_eq!(card.column.name, "Failed");
+        assert_eq!(card.column.name, "Pending");
     }
 
     #[test]
