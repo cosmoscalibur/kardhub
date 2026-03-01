@@ -21,10 +21,8 @@ pub struct SettingsProps {
     pub cached_closed_count: Option<usize>,
     /// Callback to set the default repo for the current source.
     pub on_set_default_repo: EventHandler<Option<String>>,
-    /// Callback to refresh sources from API.
+    /// Callback to refresh sources and repos from API.
     pub on_refresh_sources: EventHandler<()>,
-    /// Callback to refresh repos from API.
-    pub on_refresh_repos: EventHandler<()>,
     /// Callback to refresh closed issues from API.
     pub on_refresh_closed: EventHandler<()>,
     /// Callback to close the settings view.
@@ -37,7 +35,6 @@ pub fn Settings(props: SettingsProps) -> Element {
     let on_close = props.on_close;
     let on_set_default = props.on_set_default_repo;
     let on_refresh_sources = props.on_refresh_sources;
-    let on_refresh_repos = props.on_refresh_repos;
     let on_refresh_closed = props.on_refresh_closed;
 
     let default_val = props.default_repo.clone().unwrap_or_default();
@@ -89,13 +86,19 @@ pub fn Settings(props: SettingsProps) -> Element {
                 div { class: "settings-section",
                     div { class: "settings-section-title", "Cache Status" }
 
-                    // Sources
+                    // Sources & Repos
                     div { class: "settings-cache-row",
                         div { class: "settings-cache-info",
-                            span { class: "settings-cache-label", "Organizations" }
+                            span { class: "settings-cache-label", "Sources & Repos" }
                             span { class: "settings-cache-count",
                                 if let Some(count) = props.cached_sources_count {
-                                    "{count} cached"
+                                    "{count} sources"
+                                } else {
+                                    "not cached"
+                                }
+                                " / "
+                                if let Some(count) = props.cached_repos_count {
+                                    "{count} repos"
                                 } else {
                                     "not cached"
                                 }
@@ -104,25 +107,6 @@ pub fn Settings(props: SettingsProps) -> Element {
                         button {
                             class: "refresh-btn",
                             onclick: move |_| on_refresh_sources.call(()),
-                            "🔃 Refresh"
-                        }
-                    }
-
-                    // Repos
-                    div { class: "settings-cache-row",
-                        div { class: "settings-cache-info",
-                            span { class: "settings-cache-label", "Repositories" }
-                            span { class: "settings-cache-count",
-                                if let Some(count) = props.cached_repos_count {
-                                    "{count} cached"
-                                } else {
-                                    "not cached"
-                                }
-                            }
-                        }
-                        button {
-                            class: "refresh-btn",
-                            onclick: move |_| on_refresh_repos.call(()),
                             "🔃 Refresh"
                         }
                     }

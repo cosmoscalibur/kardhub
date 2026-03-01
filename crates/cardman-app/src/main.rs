@@ -7,12 +7,13 @@ mod cache;
 mod components;
 
 use cache::{
-    AppSettings, cached_card_count, clear_all_cache, closed_sync_time, is_cards_fresh,
-    is_labels_fresh, is_members_fresh, is_repos_fresh, is_sources_fresh, load_cards,
-    load_closed_issues, load_labels, load_members, load_merged_prs, load_open_issues, load_prs,
-    load_repos, load_settings, load_sources, merged_sync_time, open_sync_time, prs_sync_time,
-    save_cards, save_closed_issues, save_labels, save_members, save_merged_prs, save_open_issues,
-    save_prs, save_repos, save_settings, save_sources, source_key,
+    AppSettings, OrgSources, SourceMap, SourceRepos, cached_card_count, clear_all_cache,
+    closed_sync_time, is_cards_fresh, is_labels_fresh, is_members_fresh, is_profile_fresh,
+    is_source_map_fresh, load_cards, load_closed_issues, load_labels, load_members,
+    load_merged_prs, load_open_issues, load_profile, load_prs, load_settings, load_source_map,
+    merged_sync_time, open_sync_time, prs_sync_time, save_cards, save_closed_issues, save_labels,
+    save_members, save_merged_prs, save_open_issues, save_profile, save_prs, save_settings,
+    save_source_map, source_key,
 };
 use cardman_core::github::RestClient;
 use cardman_core::mapping::{MappingConfig, map_card};
@@ -22,7 +23,7 @@ use components::create_issue::CreateIssue;
 use components::detail::CardDetail;
 use components::login::LoginScreen;
 use components::settings::Settings;
-use components::sidebar::{RepoEntry, Sidebar, SourceKind};
+use components::sidebar::{PersonalFilter, RepoEntry, Sidebar, SourceKind};
 use dioxus::prelude::*;
 
 /// Application-wide state.
@@ -37,7 +38,7 @@ enum AppState {
     Dashboard {
         user: AuthenticatedUser,
         token: String,
-        orgs: Vec<String>,
+        source_map: SourceMap,
         source: SourceKind,
         repos: Vec<String>,
         /// Indices of currently selected (checked) repos.
@@ -68,8 +69,8 @@ fn owner_for_source(source: &SourceKind, user_login: &str) -> String {
     }
 }
 
-/// Source key for cache filenames.
-fn sk_for_source(source: &SourceKind) -> String {
+/// Source key string for the sidebar source (used in cache filenames).
+fn source_key_for(source: &SourceKind) -> String {
     match source {
         SourceKind::Personal => "personal".to_string(),
         SourceKind::Organization(org) => source_key(org),
@@ -98,6 +99,7 @@ fn app() -> Element {
     let mut show_settings = use_signal(|| false);
     let mut show_create_issue = use_signal(|| false);
     let mut app_settings = use_signal(load_settings);
+    let mut personal_filter = use_signal(PersonalFilter::default);
 
     // Auto-login from saved token on first render
     let mut auto_login_done = use_signal(|| false);
@@ -222,14 +224,15 @@ fn app() -> Element {
         AppState::Dashboard {
             user,
             token,
-            orgs,
+            source_map,
             source,
             repos,
             selected_repos,
             cards,
         } => {
             let owner = owner_for_source(&source, &user.login);
-            let sk = sk_for_source(&source);
+            let sk = source_key_for(&source);
+            let orgs = source_map.org_names();
             let repo_entries = build_repo_entries(&repos, &owner);
 
             let repo_display = if selected_repos.is_empty() {
@@ -241,8 +244,8 @@ fn app() -> Element {
             };
 
             // Cache counts for settings
-            let cached_sources_count = load_sources().map(|s| s.len());
-            let cached_repos_count = load_repos(&sk).map(|r| r.len());
+            let cached_sources_count = Some(orgs.len() + 1); // +1 for personal
+            let cached_repos_count = Some(repos.len());
             let cached_closed_count = if selected_repos.len() == 1 {
                 repos
                     .get(selected_repos[0])
@@ -302,19 +305,16 @@ fn app() -> Element {
             let token_for_source = token.clone();
             let token_for_refresh = token.clone();
             let token_for_rs = token.clone();
-            let token_for_rr = token.clone();
             let token_for_rc = token.clone();
             let source_for_toggle = source.clone();
             let source_for_refresh = source.clone();
             let user_for_toggle = user.clone();
-            let user_for_source = user.clone();
             let user_for_refresh = user.clone();
             let repos_for_toggle = repos.clone();
             let repos_for_refresh = repos.clone();
             let selected_for_refresh = selected_repos.clone();
-            let source_for_rr = source.clone();
             let source_for_rc = source.clone();
-            let user_for_rr = user.clone();
+            let user_for_rs = user.clone();
             let user_for_rc = user.clone();
             let repos_for_rc = repos.clone();
             let selected_for_rc = selected_repos.clone();
@@ -333,6 +333,35 @@ fn app() -> Element {
                             source: source.clone(),
                             repos: repo_entries,
                             selected_repos: selected_repos.clone(),
+                            personal_filter: personal_filter(),
+                            on_personal_filter: move |filter: PersonalFilter| {
+                                // Derive repos based on the new filter
+                                let repos = if let AppState::Dashboard {
+                                    ref source_map, ..
+                                } = state()
+                                {
+                                    match &filter {
+                                        PersonalFilter::Owner => source_map.personal.owner.clone(),
+                                        PersonalFilter::Collaborator => {
+                                            source_map.personal.collaborator.clone()
+                                        }
+                                    }
+                                } else {
+                                    Vec::new()
+                                };
+                                personal_filter.set(filter);
+                                if let AppState::Dashboard {
+                                    repos: ref mut r,
+                                    selected_repos: ref mut sr,
+                                    cards: ref mut c,
+                                    ..
+                                } = *state.write()
+                                {
+                                    *r = repos;
+                                    *sr = Vec::new();
+                                    *c = Vec::new();
+                                }
+                            },
                             on_toggle_repo: move |idx: usize| {
                                 let token = token_for_toggle.clone();
                                 let repos = repos_for_toggle.clone();
@@ -487,72 +516,77 @@ fn app() -> Element {
                             },
                             on_select_source: move |new_source: SourceKind| {
                                 let token = token_for_source.clone();
-                                let user = user_for_source.clone();
                                 let mut state = state;
-                                let mut board_loading = board_loading;
                                 let mut app_settings = app_settings;
                                 let new_source_clone = new_source.clone();
                                 let settings = app_settings();
-                                spawn(async move {
-                                    board_loading.set(true);
 
-                                    let sk = sk_for_source(&new_source_clone);
-                                    let repos = if let Some(cached) = load_repos(&sk) {
-                                        cached
-                                    } else {
-                                        let fetched = fetch_repos_for_source(
-                                            &token,
-                                            &new_source_clone,
-                                            &user.login,
-                                        )
-                                        .await;
-                                        save_repos(&sk, &fetched);
-                                        fetched
-                                    };
-
-                                    // Fetch members when selecting an org source
-                                    if let SourceKind::Organization(ref org) = new_source_clone
-                                        && !is_members_fresh(org)
-                                    {
-                                        let client = RestClient::new(token.clone());
-                                        if let Ok(members) = client.list_members(org).await {
-                                            save_members(org, &members);
+                                // Derive repos from current source_map (in memory)
+                                let repos = if let AppState::Dashboard {
+                                    ref source_map, ..
+                                } = state()
+                                {
+                                    match &new_source_clone {
+                                        SourceKind::Personal => {
+                                            source_map.personal.owner.clone()
+                                        }
+                                        SourceKind::Organization(org) => {
+                                            source_map.repos_for_source(org)
                                         }
                                     }
+                                } else {
+                                    Vec::new()
+                                };
 
-                                    // Restore last selected repos for this source
-                                    let default_selected: Vec<usize> = settings
-                                        .last_repos
-                                        .iter()
-                                        .filter_map(|name| repos.iter().position(|r| r == name))
-                                        .collect();
+                                // Apply source switch synchronously (repos appear instantly)
+                                let default_selected: Vec<usize> = settings
+                                    .last_repos
+                                    .iter()
+                                    .filter_map(|name| repos.iter().position(|r| r == name))
+                                    .collect();
 
-                                    if let AppState::Dashboard {
-                                        source: ref mut s,
-                                        repos: ref mut r,
-                                        selected_repos: ref mut sr,
-                                        cards: ref mut c,
-                                        ..
-                                    } = *state.write()
-                                    {
-                                        *s = new_source.clone();
-                                        *r = repos;
-                                        *sr = default_selected;
-                                        *c = Vec::new();
-                                    }
+                                if let AppState::Dashboard {
+                                    source: ref mut s,
+                                    repos: ref mut r,
+                                    selected_repos: ref mut sr,
+                                    cards: ref mut c,
+                                    ..
+                                } = *state.write()
+                                {
+                                    *s = new_source.clone();
+                                    *r = repos;
+                                    *sr = default_selected;
+                                    *c = Vec::new();
+                                }
 
-                                    // Save last source
-                                    let mut sett = load_settings();
-                                    let source_name = match &new_source {
-                                        SourceKind::Personal => "personal".to_string(),
-                                        SourceKind::Organization(org) => org.clone(),
-                                    };
-                                    sett.last_source = Some(source_name);
-                                    save_settings(&sett);
-                                    app_settings.set(sett);
+                                // Reset personal filter when switching sources
+                                personal_filter.set(PersonalFilter::default());
 
-                                    board_loading.set(false);
-                                });
+                                // Persist last source
+                                let mut sett = load_settings();
+                                let source_name = match &new_source {
+                                    SourceKind::Personal => "personal".to_string(),
+                                    SourceKind::Organization(org) => org.clone(),
+                                };
+                                sett.last_source = Some(source_name);
+                                save_settings(&sett);
+                                app_settings.set(sett);
+
+                                // Fetch members in the background if stale
+                                if let SourceKind::Organization(ref org) = new_source_clone
+                                    && !is_members_fresh(org)
+                                {
+                                    let org = org.clone();
+                                    let mut board_loading = board_loading;
+                                    spawn(async move {
+                                        board_loading.set(true);
+                                        let client = RestClient::new(token);
+                                        if let Ok(members) = client.list_members(&org).await {
+                                            save_members(&org, &members);
+                                        }
+                                        board_loading.set(false);
+                                    });
+                                }
                             },
                             on_toggle: move |_| {
                                 sidebar_collapsed.set(!sidebar_collapsed());
@@ -722,11 +756,9 @@ fn app() -> Element {
                                 let repos_for_settings = repos.clone();
                                 let sk_for_default = sk.clone();
                                 let token_rs = token_for_rs.clone();
-                                let token_rr = token_for_rr.clone();
+                                let user_rs = user_for_rs.clone();
                                 let token_rc = token_for_rc.clone();
-                                let source_rr = source_for_rr.clone();
                                 let source_rc = source_for_rc.clone();
-                                let user_rr = user_for_rr.clone();
                                 let user_rc = user_for_rc.clone();
                                 let repos_rc = repos_for_rc.clone();
                                 let selected_rc = selected_for_rc.clone();
@@ -751,52 +783,45 @@ fn app() -> Element {
                                         },
                                         on_refresh_sources: move |_| {
                                             let token = token_rs.clone();
+                                            let user = user_rs.clone();
                                             let mut state = state;
                                             let mut board_loading = board_loading;
                                             spawn(async move {
                                                 board_loading.set(true);
-                                                let client = RestClient::new(token);
-                                                let orgs = client
-                                                    .list_orgs()
-                                                    .await
-                                                    .map(|o| {
-                                                        o.into_iter()
-                                                            .map(|org| org.login)
-                                                            .collect::<Vec<_>>()
-                                                    })
-                                                    .unwrap_or_default();
-                                                save_sources(&orgs);
-                                                if let AppState::Dashboard {
-                                                    orgs: ref mut o, ..
-                                                } = *state.write()
-                                                {
-                                                    *o = orgs;
-                                                }
-                                                board_loading.set(false);
-                                            });
-                                        },
-                                        on_refresh_repos: move |_| {
-                                            let token = token_rr.clone();
-                                            let source = source_rr.clone();
-                                            let user = user_rr.clone();
-                                            let mut state = state;
-                                            let mut board_loading = board_loading;
-                                            spawn(async move {
-                                                board_loading.set(true);
-                                                let repos = fetch_repos_for_source(
-                                                    &token, &source, &user.login,
+                                                let new_map = build_source_map(
+                                                    &token, &user.login,
                                                 )
                                                 .await;
-                                                let sk = sk_for_source(&source);
-                                                save_repos(&sk, &repos);
+                                                save_source_map(&new_map);
+
+                                                // Derive repos for current source
+                                                let current_source = if let AppState::Dashboard {
+                                                    ref source, ..
+                                                } = state()
+                                                {
+                                                    source.clone()
+                                                } else {
+                                                    SourceKind::Personal
+                                                };
+                                                let src_key = match &current_source {
+                                                    SourceKind::Personal => {
+                                                        "personal".to_string()
+                                                    }
+                                                    SourceKind::Organization(org) => org.clone(),
+                                                };
+                                                let new_repos =
+                                                    new_map.repos_for_source(&src_key);
+
                                                 if let AppState::Dashboard {
+                                                    source_map: ref mut sm,
                                                     repos: ref mut r,
                                                     selected_repos: ref mut sr,
                                                     cards: ref mut c,
                                                     ..
                                                 } = *state.write()
                                                 {
-                                                    *r = repos;
+                                                    *sm = new_map;
+                                                    *r = new_repos;
                                                     *sr = Vec::new();
                                                     *c = Vec::new();
                                                 }
@@ -876,43 +901,48 @@ fn app() -> Element {
 async fn authenticate_and_load(token: String) -> Result<AppState, String> {
     let client = RestClient::new(token.clone());
 
-    let user = client
-        .get_authenticated_user()
-        .await
-        .map_err(|e| format!("Authentication failed: {e}"))?;
-
-    // Orgs: cache-first with 6-month TTL
-    let orgs = if is_sources_fresh() {
-        load_sources().unwrap_or_default()
+    // Profile: cache-first with 1-month TTL
+    let user = if is_profile_fresh() {
+        if let Some(cached) = load_profile() {
+            cached
+        } else {
+            let fetched = client
+                .get_authenticated_user()
+                .await
+                .map_err(|e| format!("Authentication failed: {e}"))?;
+            save_profile(&fetched);
+            fetched
+        }
     } else {
         let fetched = client
-            .list_orgs()
+            .get_authenticated_user()
             .await
-            .map(|o| o.into_iter().map(|org| org.login).collect::<Vec<_>>())
-            .unwrap_or_default();
-        save_sources(&fetched);
+            .map_err(|e| format!("Authentication failed: {e}"))?;
+        save_profile(&fetched);
         fetched
+    };
+
+    // Unified source map: cache-first with 6-month TTL
+    let source_map = if is_source_map_fresh() {
+        load_source_map().unwrap_or_default()
+    } else {
+        let map = build_source_map(&token, &user.login).await;
+        save_source_map(&map);
+        map
     };
 
     // Restore last state
     let settings = load_settings();
+    let orgs = source_map.org_names();
     let source = match &settings.last_source {
         Some(s) if s != "personal" && orgs.contains(s) => SourceKind::Organization(s.clone()),
         _ => SourceKind::Personal,
     };
 
-    let sk = sk_for_source(&source);
-
-    // Repos: cache-first with 1-month TTL
-    let user_login = user.login.clone();
-    let repos = if is_repos_fresh(&sk) {
-        load_repos(&sk).unwrap_or_default()
-    } else if let Some(cached) = load_repos(&sk) {
-        cached
-    } else {
-        let fetched = fetch_repos_for_source(&token, &source, &user_login).await;
-        save_repos(&sk, &fetched);
-        fetched
+    // Derive repos from source map (personal defaults to owned only)
+    let repos = match &source {
+        SourceKind::Personal => source_map.personal.owner.clone(),
+        SourceKind::Organization(org) => source_map.repos_for_source(org),
     };
 
     // Fetch members when restoring an org source (if not cached)
@@ -932,6 +962,7 @@ async fn authenticate_and_load(token: String) -> Result<AppState, String> {
 
     // Load cached cards for selected repos; re-fetch inline if cache is
     // missing or corrupt (seamless cache migration).
+    let user_login = user.login.clone();
     let owner = owner_for_source(&source, &user_login);
     let mut cards = Vec::new();
     for &idx in &selected_repos {
@@ -939,7 +970,6 @@ async fn authenticate_and_load(token: String) -> Result<AppState, String> {
             let repo_cards = match load_cards(&owner, repo_name) {
                 Some(cached) => cached,
                 None => {
-                    // Cache miss (corrupt/missing) → fetch immediately
                     let fetched = fetch_cards(&token, &owner, repo_name).await;
                     save_cards(&owner, repo_name, &fetched);
                     fetched
@@ -953,7 +983,7 @@ async fn authenticate_and_load(token: String) -> Result<AppState, String> {
     Ok(AppState::Dashboard {
         user,
         token,
-        orgs,
+        source_map,
         source,
         repos,
         selected_repos,
@@ -961,30 +991,58 @@ async fn authenticate_and_load(token: String) -> Result<AppState, String> {
     })
 }
 
-/// Fetch repos for a given source kind.
-async fn fetch_repos_for_source(token: &str, source: &SourceKind, user_login: &str) -> Vec<String> {
+/// Build a unified [`SourceMap`] from parallel `/user/repos` + `/user/orgs`.
+///
+/// Categorises each repo as owned/member or collaborator based on
+/// owner type and the set of org memberships.
+async fn build_source_map(token: &str, user_login: &str) -> SourceMap {
+    use std::collections::{BTreeMap, HashSet};
+
     let client = RestClient::new(token.to_string());
-    match source {
-        SourceKind::Personal => client
-            .list_repos()
-            .await
-            .map(|r| {
-                r.into_iter()
-                    .filter(|repo| !repo.archived && repo.owner == user_login)
-                    .map(|repo| repo.name)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
-        SourceKind::Organization(org) => client
-            .list_org_repos(org)
-            .await
-            .map(|r| {
-                r.into_iter()
-                    .filter(|repo| !repo.archived)
-                    .map(|repo| repo.name)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
+
+    // Parallel fetch
+    let (all_repos_res, orgs_res) = tokio::join!(client.list_all_repos(), client.list_orgs());
+
+    let all_repos = all_repos_res.unwrap_or_default();
+    let member_orgs: HashSet<String> = orgs_res
+        .unwrap_or_default()
+        .into_iter()
+        .map(|o| o.login)
+        .collect();
+
+    let mut personal = SourceRepos::default();
+    let mut member_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut collaborator_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for repo in all_repos {
+        if repo.archived {
+            continue;
+        }
+        if repo.owner_type == "Organization" {
+            if member_orgs.contains(&repo.owner) {
+                member_map
+                    .entry(repo.owner.clone())
+                    .or_default()
+                    .push(repo.name);
+            } else {
+                collaborator_map
+                    .entry(repo.owner.clone())
+                    .or_default()
+                    .push(repo.name);
+            }
+        } else if repo.owner == user_login {
+            personal.owner.push(repo.name);
+        } else {
+            personal.collaborator.push(repo.name);
+        }
+    }
+
+    SourceMap {
+        personal,
+        organizations: OrgSources {
+            member: member_map,
+            collaborator: collaborator_map,
+        },
     }
 }
 

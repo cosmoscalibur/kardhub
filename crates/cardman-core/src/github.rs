@@ -92,12 +92,16 @@ struct GhRepo {
 #[derive(Debug, Deserialize)]
 struct GhRepoOwner {
     login: String,
+    /// Account type: `"User"` or `"Organization"`.
+    #[serde(rename = "type")]
+    owner_type: String,
 }
 
 impl From<GhRepo> for Repository {
     fn from(r: GhRepo) -> Self {
         Self {
             owner: r.owner.login,
+            owner_type: r.owner.owner_type,
             name: r.name,
             archived: r.archived,
             default_branch: r.default_branch,
@@ -450,6 +454,15 @@ impl RestClient {
     /// List repositories for the authenticated user.
     /// Excludes archived repositories by default.
     pub async fn list_repos(&self) -> Result<Vec<Repository>, GitHubError> {
+        let repos: Vec<GhRepo> = self.paginate("/user/repos?type=all&sort=updated").await?;
+        Ok(repos.into_iter().map(Into::into).collect())
+    }
+
+    /// List all repositories accessible to the authenticated user.
+    ///
+    /// Returns every repo (owned, member-org, collaborator) without filtering.
+    /// Used to build the unified [`SourceMap`].
+    pub async fn list_all_repos(&self) -> Result<Vec<Repository>, GitHubError> {
         let repos: Vec<GhRepo> = self.paginate("/user/repos?type=all&sort=updated").await?;
         Ok(repos.into_iter().map(Into::into).collect())
     }
@@ -975,12 +988,22 @@ mod tests {
             default_branch: "main".into(),
             owner: GhRepoOwner {
                 login: "octocat".into(),
+                owner_type: "User".into(),
             },
         };
         let repo: Repository = gh.into();
         assert_eq!(repo.owner, "octocat");
+        assert_eq!(repo.owner_type, "User");
         assert_eq!(repo.name, "hello-world");
         assert!(!repo.archived);
+    }
+
+    #[test]
+    fn gh_repo_owner_type_deserializes() {
+        let json = r#"{"login":"my-org","type":"Organization"}"#;
+        let owner: GhRepoOwner = serde_json::from_str(json).unwrap();
+        assert_eq!(owner.login, "my-org");
+        assert_eq!(owner.owner_type, "Organization");
     }
 
     #[test]

@@ -328,14 +328,25 @@ select {
 .source-org-select {
   width: 100%;
   padding: 6px 8px;
-  font-size: 13px;
+  padding-right: 24px;
+  font-size: 12px;
+  font-weight: 500;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-default);
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
-  appearance: auto;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
   outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b949e'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.light .source-org-select {
+  color-scheme: light;
 }
 
 .source-org-select:focus {
@@ -343,7 +354,7 @@ select {
 }
 
 .source-org-select option {
-  background: var(--bg-primary);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
   padding: 4px 8px;
 }

@@ -16,6 +16,16 @@ pub enum SourceKind {
     Organization(String),
 }
 
+/// Filter for personal repositories.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum PersonalFilter {
+    /// Show only owned repos.
+    #[default]
+    Owner,
+    /// Show only collaborator repos.
+    Collaborator,
+}
+
 /// A repository entry with its name and cached card count for sorting.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepoEntry {
@@ -58,6 +68,11 @@ pub struct SidebarProps {
     pub on_settings: EventHandler<()>,
     /// Callback to sign out.
     pub on_sign_out: EventHandler<()>,
+    /// Current personal filter.
+    #[props(default)]
+    pub personal_filter: PersonalFilter,
+    /// Callback when the personal filter changes.
+    pub on_personal_filter: EventHandler<PersonalFilter>,
 }
 
 /// The left sidebar panel.
@@ -171,6 +186,32 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                                         }
                                     },
                                     "🏢 Organization"
+                                }
+                            }
+                        }
+                    }
+                    // Personal filter dropdown (shown only when personal mode)
+                    if !is_org_mode {
+                        {
+                            let on_pf = props.on_personal_filter;
+                            let current_filter = match &props.personal_filter {
+                                PersonalFilter::Owner => "owner",
+                                PersonalFilter::Collaborator => "collaborator",
+                            };
+                            rsx! {
+                                select {
+                                    class: "source-org-select",
+                                    value: "{current_filter}",
+                                    onchange: move |evt: Event<FormData>| {
+                                        let val = evt.value();
+                                        let filter = match val.as_str() {
+                                            "collaborator" => PersonalFilter::Collaborator,
+                                            _ => PersonalFilter::Owner,
+                                        };
+                                        on_pf.call(filter);
+                                    },
+                                    option { value: "owner", selected: current_filter == "owner", "Owned" }
+                                    option { value: "collaborator", selected: current_filter == "collaborator", "Collaborator" }
                                 }
                             }
                         }

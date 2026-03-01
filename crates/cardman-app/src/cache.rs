@@ -8,11 +8,11 @@
 //! cumulative caching: new entries are appended and deduplicated.
 //! Sync timestamps are embedded inside each JSON file via [`Timestamped`].
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 
-use cardman_core::models::{Card, Issue, Label, PullRequest, User};
+use cardman_core::models::{AuthenticatedUser, Card, Issue, Label, PullRequest, User};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -124,38 +124,112 @@ fn is_ts_fresh(name: &str, ttl_secs: i64) -> bool {
     Utc::now().signed_duration_since(ts.synced_at) < ttl
 }
 
-// ── Sources (organizations) ──────────────────────────────────────────
+// ── Unified source map ───────────────────────────────────────────────
 
-/// Load cached organization logins.
-pub fn load_sources() -> Option<Vec<String>> {
-    load_timestamped::<Vec<String>>("sources.json").map(|t| t.data)
+/// Personal repos categorized by the user's relationship.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SourceRepos {
+    /// Repos owned by the authenticated user.
+    #[serde(default)]
+    pub owner: Vec<String>,
+    /// Repos where the user is an outside collaborator.
+    #[serde(default)]
+    pub collaborator: Vec<String>,
 }
 
-/// Save organization logins to cache.
-pub fn save_sources(orgs: &[String]) {
-    save_timestamped("sources.json", &orgs.to_vec());
+impl SourceRepos {
+    /// Flat list combining owner and collaborator repos.
+    pub fn all_repos(&self) -> Vec<String> {
+        let mut repos = self.owner.clone();
+        repos.extend(self.collaborator.iter().cloned());
+        repos
+    }
 }
 
-/// Check whether sources cache is fresh (< 6 months).
-pub fn is_sources_fresh() -> bool {
-    is_ts_fresh("sources.json", TTL_SOURCES)
+/// Organization repos split by membership relationship.
+///
+/// Each org login appears under exactly one category.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OrgSources {
+    /// Orgs where the user is a member, keyed by org login.
+    #[serde(default)]
+    pub member: BTreeMap<String, Vec<String>>,
+    /// Orgs where the user is an outside collaborator, keyed by org login.
+    #[serde(default)]
+    pub collaborator: BTreeMap<String, Vec<String>>,
 }
 
-// ── Repositories ─────────────────────────────────────────────────────
-
-/// Load cached repository names for a given source.
-pub fn load_repos(src_key: &str) -> Option<Vec<String>> {
-    load_timestamped::<Vec<String>>(&format!("repos_{src_key}.json")).map(|t| t.data)
+/// Unified source map stored in a single cache file.
+///
+/// Groups all accessible repos by source (personal vs organization)
+/// and by user relationship.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SourceMap {
+    /// Personal repositories grouped by relationship.
+    pub personal: SourceRepos,
+    /// Organization repositories split by member/collaborator.
+    pub organizations: OrgSources,
 }
 
-/// Save repository names for a given source.
-pub fn save_repos(src_key: &str, repos: &[String]) {
-    save_timestamped(&format!("repos_{src_key}.json"), &repos.to_vec());
+impl SourceMap {
+    /// Sorted list of all organization logins (member + collaborator).
+    pub fn org_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .organizations
+            .member
+            .keys()
+            .chain(self.organizations.collaborator.keys())
+            .cloned()
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Flat repo-name list for a given sidebar source.
+    pub fn repos_for_source(&self, source: &str) -> Vec<String> {
+        if source == "personal" {
+            self.personal.all_repos()
+        } else if let Some(repos) = self.organizations.member.get(source) {
+            repos.clone()
+        } else if let Some(repos) = self.organizations.collaborator.get(source) {
+            repos.clone()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
-/// Check whether repos cache is fresh (< 1 month).
-pub fn is_repos_fresh(src_key: &str) -> bool {
-    is_ts_fresh(&format!("repos_{src_key}.json"), TTL_REPOS)
+/// Load cached source map.
+pub fn load_source_map() -> Option<SourceMap> {
+    load_timestamped::<SourceMap>("source_map.json").map(|t| t.data)
+}
+
+/// Save source map to cache.
+pub fn save_source_map(map: &SourceMap) {
+    save_timestamped("source_map.json", map);
+}
+
+/// Check whether source map cache is fresh (< 6 months).
+pub fn is_source_map_fresh() -> bool {
+    is_ts_fresh("source_map.json", TTL_SOURCES)
+}
+
+// ── Profile (authenticated user) ─────────────────────────────────────
+
+/// Load cached authenticated user profile.
+pub fn load_profile() -> Option<AuthenticatedUser> {
+    load_timestamped::<AuthenticatedUser>("profile.json").map(|t| t.data)
+}
+
+/// Save authenticated user profile to cache.
+pub fn save_profile(user: &AuthenticatedUser) {
+    save_timestamped("profile.json", user);
+}
+
+/// Check whether profile cache is fresh (< 1 month).
+pub fn is_profile_fresh() -> bool {
+    is_ts_fresh("profile.json", TTL_REPOS)
 }
 
 // ── Members ──────────────────────────────────────────────────────────

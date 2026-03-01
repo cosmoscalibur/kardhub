@@ -36,6 +36,9 @@ pub struct AuthenticatedUser {
 pub struct Repository {
     /// Repository owner login.
     pub owner: String,
+    /// Owner account type: `"User"` or `"Organization"`.
+    #[serde(default)]
+    pub owner_type: String,
     /// Repository name.
     pub name: String,
     /// Whether the repository is archived.
