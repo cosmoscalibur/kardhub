@@ -84,7 +84,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
         "sidebar"
     };
 
-    let theme_icon = if props.dark_mode { "☀️" } else { "🌙" };
+    let theme_icon = if props.dark_mode { "☀️" } else { "🌑" };
     let theme_label = if props.dark_mode { "Light" } else { "Dark" };
     let toggle_icon = if props.collapsed { "▶" } else { "◀" };
 

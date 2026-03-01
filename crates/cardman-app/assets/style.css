@@ -52,30 +52,33 @@
 
 /* ── Light Theme ───────────────────────────────────────────────────── */
 .light {
-  --bg-primary: #f9fafb;
-  --bg-secondary: #f4f6f8;
-  --bg-tertiary: #e5e7eb;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
   --bg-card: #ffffff;
-  --bg-hover: #ebedf0;
-  --bg-active: #d1d5db;
+  --bg-hover: #f0f2f5;
+  --bg-active: #d8dee4;
 
-  --text-primary: #1a1a2e;
-  --text-secondary: #1f2937;
-  --text-muted: #374151;
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-muted: #8b949e;
 
-  --border-default: #9ca3af;
-  --border-subtle: #d1d5db;
+  --border-default: #d0d7de;
+  --border-subtle: #d8dee4;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-muted: #dbeafe;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --accent-muted: #ddf4ff;
 
-  --success: #15803d;
-  --warning: #b45309;
-  --danger: #b91c1c;
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --danger: #cf222e;
 
-  --column-bg: #e5e7eb;
-  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --column-bg: #f0f2f5;
+  --card-shadow: 0 1px 3px rgba(31, 35, 40, 0.1);
+
+  color: var(--text-primary);
+  background: var(--bg-primary);
 }
 
 /* ── Reset & Base ──────────────────────────────────────────────────── */
@@ -382,6 +385,7 @@ select {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg-primary);
 }
 
 .board-header {
