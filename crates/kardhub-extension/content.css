@@ -1,0 +1,550 @@
+/* KardHub extension — content styles.
+ *
+ * Injected into GitHub pages alongside the content loader script.
+ * Uses GitHub's CSS custom properties for theme-aware styling.
+ */
+
+/* ── Dashboard container (inline, under tabs) ────────────────────────── */
+
+#kardhub-dashboard {
+    padding: 16px;
+    min-height: 400px;
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+}
+
+/* Hide GitHub page content and footer when KardHub dashboard is open */
+body[data-kardhub-open] #repo-content-pjax-container,
+body[data-kardhub-open] turbo-frame#repo-content-turbo-frame,
+body[data-kardhub-open] .repository-content,
+body[data-kardhub-open] #repo-content-turbo-frame,
+body[data-kardhub-open] .js-repo-pjax-container,
+body[data-kardhub-open] main>turbo-frame,
+body[data-kardhub-open] main>div.container-xl,
+body[data-kardhub-open] footer,
+body[data-kardhub-open] .footer {
+    display: none !important;
+}
+
+/* ── ZenHub-style layout: sidebar + board ────────────────────────────── */
+
+.kardhub-layout {
+    display: flex;
+    gap: 0;
+    height: calc(100vh - 180px);
+    min-height: 400px;
+}
+
+/* ── Sidebar filter panel ────────────────────────────────────────────── */
+
+.kardhub-sidebar {
+    width: 220px;
+    min-width: 220px;
+    border-right: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+    border-radius: 8px 0 0 8px;
+}
+
+.kardhub-org-select {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 6px;
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    font-size: 12px;
+}
+
+.kardhub-personal-filter {
+    display: flex;
+    gap: 4px;
+}
+
+.kardhub-filter-btn {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    cursor: pointer;
+    font-size: 11px;
+    text-align: center;
+    transition: all 0.15s;
+}
+
+.kardhub-filter-btn-active {
+    background: var(--bgColor-accent-muted, var(--color-accent-subtle, #388bfd26));
+    border-color: var(--borderColor-accent-muted, var(--color-accent-muted, #388bfd66));
+    color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
+}
+
+.kardhub-sidebar-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    margin-top: 4px;
+}
+
+.kardhub-repo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.kardhub-repo-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.kardhub-repo-item:hover {
+    background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #6e768166));
+}
+
+.kardhub-repo-item input[type="checkbox"] {
+    accent-color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
+    cursor: pointer;
+    margin: 0;
+}
+
+/* ── Board area ──────────────────────────────────────────────────────── */
+
+.kardhub-board-area {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.kardhub-board {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 12px;
+    height: 100%;
+    -webkit-overflow-scrolling: touch;
+}
+
+.kardhub-board::-webkit-scrollbar {
+    height: 8px;
+}
+
+.kardhub-board::-webkit-scrollbar-track {
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+    border-radius: 4px;
+}
+
+.kardhub-board::-webkit-scrollbar-thumb {
+    background: var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 4px;
+}
+
+/* ── Kanban columns ──────────────────────────────────────────────────── */
+
+.kardhub-column {
+    flex: 0 0 260px;
+    min-width: 260px;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+    border-radius: 8px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+}
+
+.kardhub-column-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    border-bottom: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    position: sticky;
+    top: 0;
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+    z-index: 1;
+    border-radius: 8px 8px 0 0;
+}
+
+.kardhub-column-emoji {
+    font-size: 14px;
+}
+
+.kardhub-column-name {
+    flex: 1;
+}
+
+.kardhub-column-count {
+    background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #6e768166));
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.kardhub-column-cards {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+
+.kardhub-card {
+    display: block;
+    padding: 10px 12px;
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 6px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+}
+
+.kardhub-card:hover {
+    border-color: var(--borderColor-accent-muted, var(--color-accent-muted, #388bfd66));
+    box-shadow: 0 0 0 1px var(--borderColor-accent-muted, var(--color-accent-muted, #388bfd66));
+    text-decoration: none;
+    color: inherit;
+}
+
+.kardhub-card-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+}
+
+.kardhub-card-icon {
+    font-size: 12px;
+}
+
+.kardhub-card-number {
+    font-weight: 600;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+}
+
+.kardhub-card-repo {
+    font-size: 11px;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    opacity: 0.7;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+}
+
+.kardhub-card-title {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+/* ── Assignee avatars ────────────────────────────────────────────────── */
+
+.kardhub-card-assignees {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.kardhub-card-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+}
+
+.kardhub-card-avatar-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #6e768166));
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* ── Labels ──────────────────────────────────────────────────────────── */
+
+.kardhub-card-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.kardhub-label {
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: #fff;
+}
+
+/* ── Loading & error ─────────────────────────────────────────────────── */
+
+.kardhub-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 40px;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    font-size: 14px;
+}
+
+.kardhub-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-top-color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
+    border-radius: 50%;
+    animation: kardhub-spin 0.6s linear infinite;
+}
+
+@keyframes kardhub-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.kardhub-error {
+    padding: 16px;
+    text-align: center;
+    color: var(--fgColor-danger, var(--color-danger-fg, #f85149));
+    font-size: 14px;
+}
+
+.kardhub-hint {
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    font-size: 13px;
+    text-align: center;
+    padding: 12px;
+}
+
+/* ── PR Issue Linker (inline under PR body, full width) ──────────────── */
+
+.kardhub-linker-widget {
+    margin: 12px 0;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 6px;
+    overflow: hidden;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.kardhub-linker-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.kardhub-linker-header:hover {
+    background: var(--bgColor-neutral-muted, var(--color-neutral-muted, #6e768166));
+}
+
+.kardhub-linker-header::after {
+    content: "▸";
+    margin-left: auto;
+    transition: transform 0.2s;
+}
+
+.kardhub-linker-header-open::after {
+    transform: rotate(90deg);
+}
+
+.kardhub-linker-body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.kardhub-linker-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kardhub-linker-row label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+}
+
+.kardhub-linker-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+/* ── Form elements ───────────────────────────────────────────────────── */
+
+.kardhub-input {
+    padding: 5px 8px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 6px;
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    font-size: 13px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+select.kardhub-input {
+    appearance: auto;
+    cursor: pointer;
+}
+
+.kardhub-input:focus {
+    outline: none;
+    border-color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
+    box-shadow: 0 0 0 2px var(--borderColor-accent-muted, var(--color-accent-muted, #388bfd26));
+}
+
+.kardhub-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 6px;
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.kardhub-btn:hover {
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+}
+
+.kardhub-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.kardhub-btn-primary {
+    background: var(--bgColor-accent-emphasis, var(--color-accent-emphasis, #1f6feb));
+    border-color: var(--bgColor-accent-emphasis, var(--color-accent-emphasis, #1f6feb));
+    color: #fff;
+}
+
+.kardhub-btn-primary:hover {
+    background: var(--bgColor-accent-emphasis, #388bfd);
+}
+
+/* ── Search results ──────────────────────────────────────────────────── */
+
+.kardhub-search-results {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.kardhub-search-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted, #21262d));
+    font-size: 13px;
+}
+
+.kardhub-search-number {
+    font-weight: 600;
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+    flex-shrink: 0;
+}
+
+.kardhub-search-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+}
+
+.kardhub-btn-add {
+    padding: 2px 6px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.kardhub-btn-add:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.kardhub-selected-issues {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.kardhub-selected-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #161b22));
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+}
+
+.kardhub-btn-remove {
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: var(--fgColor-danger, var(--color-danger-fg, #f85149));
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.kardhub-error-sm {
+    color: var(--fgColor-danger, var(--color-danger-fg, #f85149));
+    font-size: 12px;
+    margin: 0;
+}

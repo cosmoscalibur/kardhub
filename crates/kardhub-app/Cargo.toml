@@ -1,0 +1,14 @@
+[package]
+name = "kardhub-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dioxus desktop application for KardHub."
+
+[dependencies]
+dioxus = { version = "0.7", features = ["desktop", "router"] }
+kardhub-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio = { version = "1", features = ["time"] }

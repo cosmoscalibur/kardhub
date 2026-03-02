@@ -1,4 +1,4 @@
-# Cardman
+# KardHub
 
 A Kanban board synced with GitHub issues and pull requests, built entirely in Rust. Available as a desktop app and a browser extension.
 
@@ -32,20 +32,20 @@ A Kanban board synced with GitHub issues and pull requests, built entirely in Ru
 ## Architecture
 
 ```
-cardman/
+kardhub/
 ├── crates/
-│   ├── cardman-core/     # Platform-agnostic: models, mapping engine, GitHub REST client
-│   ├── cardman-app/      # Dioxus desktop application
-│   └── cardman-extension/# Browser extension (scaffold)
+│   ├── kardhub-core/     # Platform-agnostic: models, mapping engine, GitHub REST client
+│   ├── kardhub-app/      # Dioxus desktop application
+│   └── kardhub-extension/# Browser extension (scaffold)
 ├── Cargo.toml            # Workspace root
 └── rustfmt.toml
 ```
 
 | Crate | Purpose |
 |---|---|
-| `cardman-core` | Domain models, card-to-column mapping, GitHub API client (`reqwest` native / `gloo-net` wasm), OAuth helpers |
-| `cardman-app` | Dioxus 0.7 desktop UI — sidebar, board, card detail, settings, local JSON cache |
-| `cardman-extension` | Browser extension (Chromium + Firefox, MV3) — content script, background worker, popup |
+| `kardhub-core` | Domain models, card-to-column mapping, GitHub API client (`reqwest` native / `gloo-net` wasm), OAuth helpers |
+| `kardhub-app` | Dioxus 0.7 desktop UI — sidebar, board, card detail, settings, local JSON cache |
+| `kardhub-extension` | Browser extension (Chromium + Firefox, MV3) — content script, background worker, popup |
 
 ## Requirements
 
@@ -62,14 +62,14 @@ cardman/
 
 ```zsh
 # Clone
-git clone https://github.com/cosmoscalibur/cardman.git
-cd cardman
+git clone https://github.com/cosmoscalibur/kardhub.git
+cd kardhub
 
 # Run the desktop app
-cargo run -p cardman-app
+cargo run -p kardhub-app
 
 # Run tests
-cargo test -p cardman-core
+cargo test -p kardhub-core
 
 # Lint
 cargo clippy --all-targets -- -D warnings
@@ -81,10 +81,10 @@ On first launch, enter a [GitHub Personal Access Token](https://github.com/setti
 
 ```zsh
 # Build the extension
-zsh crates/cardman-extension/build.sh
+zsh crates/kardhub-extension/build.sh
 ```
 
-The packaged extension is output to `crates/cardman-extension/dist/`.
+The packaged extension is output to `crates/kardhub-extension/dist/`.
 
 **Chrome / Chromium:**
 
@@ -97,11 +97,11 @@ The packaged extension is output to `crates/cardman-extension/dist/`.
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on** → select `dist/manifest.json`
 
-After loading, click the Cardman icon in the toolbar to configure your GitHub PAT. On any GitHub repository page, a **Cardman** tab appears in the repo navigation to show the Kanban board. On pull request pages, a floating **🃏 Link Issues** button lets you search and link issues using `Issue: owner/repo#N` syntax.
+After loading, click the KardHub icon in the toolbar to configure your GitHub PAT. On any GitHub repository page, a **KardHub** tab appears in the repo navigation to show the Kanban board. On pull request pages, a floating **🃏 Link Issues** button lets you search and link issues using `Issue: owner/repo#N` syntax.
 
 ## Local Cache
 
-Data is cached as JSON files under `$XDG_CONFIG_HOME/cardman/cache/` (defaults to `~/.config/cardman/cache/`).
+Data is cached as JSON files under `$XDG_CONFIG_HOME/kardhub/cache/` (defaults to `~/.config/kardhub/cache/`).
 
 ### Cache Files
 

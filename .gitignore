@@ -7,4 +7,4 @@ Cargo.lock
 dist/
 
 # Extension build
-crates/cardman-extension/pkg/
+crates/kardhub-extension/pkg/

@@ -1,5 +1,0 @@
-[application]
-name = "Cardman"
-default_platform = "desktop"
-out_dir = "dist"
-asset_dir = "assets"

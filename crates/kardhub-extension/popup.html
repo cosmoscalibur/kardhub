@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=300" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>KardHub</title>
+</head>
+<body>
+  <div class="popup">
+    <header class="popup-header">
+      <h1>🃏 KardHub</h1>
+      <p class="subtitle">Kanban for GitHub</p>
+    </header>
+
+    <div id="status" class="status"></div>
+
+    <form id="token-form" class="token-form" autocomplete="off">
+      <label for="pat-input">GitHub Personal Access Token</label>
+      <input
+        id="pat-input"
+        type="password"
+        placeholder="ghp_..."
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <div class="actions">
+        <button type="submit" id="save-btn" class="btn btn-primary">Save</button>
+        <button type="button" id="clear-btn" class="btn btn-danger">Clear</button>
+      </div>
+    </form>
+
+    <footer class="popup-footer">
+      <p>Requires <code>repo</code> and <code>read:org</code> scopes</p>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

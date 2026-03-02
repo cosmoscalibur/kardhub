@@ -1,0 +1,30 @@
+[package]
+name = "kardhub-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform-agnostic core logic for KardHub: domain models, card mapping, GitHub API client."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+pulldown-cmark.workspace = true
+regex.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Headers", "Request", "RequestInit", "Response", "Window"] }
+gloo-net = { version = "0.6", features = ["http"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
