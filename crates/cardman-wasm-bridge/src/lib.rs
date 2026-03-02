@@ -326,6 +326,8 @@ pub fn classify_repos_json(repos_json: &str, orgs_json: &str) -> String {
     struct RawRepo {
         name: String,
         full_name: Option<String>,
+        #[serde(default)]
+        archived: bool,
         owner: Option<RawOwner>,
     }
 
@@ -356,18 +358,21 @@ pub fn classify_repos_json(repos_json: &str, orgs_json: &str) -> String {
         org_repos: HashMap<String, Vec<RepoEntry>>,
     }
 
-    let repos: Vec<RawRepo> = serde_json::from_str(repos_json).unwrap_or_default();
+    let repos: Vec<RawRepo> = serde_json::from_str::<Vec<RawRepo>>(repos_json)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| !r.archived)
+        .collect();
     let member_orgs: Vec<RawOrg> = serde_json::from_str(orgs_json).unwrap_or_default();
 
     let mut org_set: Vec<String> = member_orgs.into_iter().map(|o| o.login).collect();
 
     for r in &repos {
-        if let Some(ref owner) = r.owner {
-            if owner.owner_type == "Organization"
-                && !org_set.iter().any(|o| o.eq_ignore_ascii_case(&owner.login))
-            {
-                org_set.push(owner.login.clone());
-            }
+        if let Some(ref owner) = r.owner
+            && owner.owner_type == "Organization"
+            && !org_set.iter().any(|o| o.eq_ignore_ascii_case(&owner.login))
+        {
+            org_set.push(owner.login.clone());
         }
     }
     org_set.sort();

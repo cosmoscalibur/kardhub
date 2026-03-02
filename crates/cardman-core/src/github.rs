@@ -109,6 +109,15 @@ impl From<GhRepo> for Repository {
     }
 }
 
+/// Filter out archived repositories from a raw API response.
+fn exclude_archived(repos: Vec<GhRepo>) -> Vec<Repository> {
+    repos
+        .into_iter()
+        .filter(|r| !r.archived)
+        .map(Into::into)
+        .collect()
+}
+
 /// GitHub API label response.
 #[derive(Debug, Deserialize)]
 struct GhLabel {
@@ -453,27 +462,30 @@ impl RestClient {
     }
 
     /// List repositories for the authenticated user.
-    /// Excludes archived repositories by default.
+    ///
+    /// Excludes archived repositories.
     pub async fn list_repos(&self) -> Result<Vec<Repository>, GitHubError> {
         let repos: Vec<GhRepo> = self.paginate("/user/repos?type=all&sort=updated").await?;
-        Ok(repos.into_iter().map(Into::into).collect())
+        Ok(exclude_archived(repos))
     }
 
     /// List all repositories accessible to the authenticated user.
     ///
-    /// Returns every repo (owned, member-org, collaborator) without filtering.
-    /// Used to build the unified [`SourceMap`].
+    /// Returns every repo (owned, member-org, collaborator) excluding
+    /// archived ones. Used to build the unified [`SourceMap`].
     pub async fn list_all_repos(&self) -> Result<Vec<Repository>, GitHubError> {
         let repos: Vec<GhRepo> = self.paginate("/user/repos?type=all&sort=updated").await?;
-        Ok(repos.into_iter().map(Into::into).collect())
+        Ok(exclude_archived(repos))
     }
 
     /// List repositories for an organization.
+    ///
+    /// Excludes archived repositories.
     pub async fn list_org_repos(&self, org: &str) -> Result<Vec<Repository>, GitHubError> {
         let repos: Vec<GhRepo> = self
             .paginate(&format!("/orgs/{org}/repos?type=all&sort=updated"))
             .await?;
-        Ok(repos.into_iter().map(Into::into).collect())
+        Ok(exclude_archived(repos))
     }
 
     /// List organizations the authenticated user belongs to.
@@ -1123,9 +1135,11 @@ impl WasmClient {
     }
 
     /// List all repositories accessible to the authenticated user.
+    ///
+    /// Excludes archived repositories.
     pub async fn list_all_repos(&self) -> Result<Vec<Repository>, GitHubError> {
         let repos: Vec<GhRepo> = self.paginate("/user/repos?type=all&sort=updated").await?;
-        Ok(repos.into_iter().map(Into::into).collect())
+        Ok(exclude_archived(repos))
     }
 
     /// List organizations the authenticated user belongs to.
@@ -1358,6 +1372,33 @@ mod tests {
         assert_eq!(repo.owner_type, "User");
         assert_eq!(repo.name, "hello-world");
         assert!(!repo.archived);
+    }
+
+    #[test]
+    fn exclude_archived_filters_correctly() {
+        let repos = vec![
+            GhRepo {
+                name: "active".into(),
+                archived: false,
+                default_branch: "main".into(),
+                owner: GhRepoOwner {
+                    login: "user".into(),
+                    owner_type: "User".into(),
+                },
+            },
+            GhRepo {
+                name: "old".into(),
+                archived: true,
+                default_branch: "main".into(),
+                owner: GhRepoOwner {
+                    login: "user".into(),
+                    owner_type: "User".into(),
+                },
+            },
+        ];
+        let result = exclude_archived(repos);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "active");
     }
 
     #[test]

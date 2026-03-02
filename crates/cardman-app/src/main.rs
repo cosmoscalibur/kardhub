@@ -1015,9 +1015,6 @@ async fn build_source_map(token: &str, user_login: &str) -> SourceMap {
     let mut collaborator_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for repo in all_repos {
-        if repo.archived {
-            continue;
-        }
         if repo.owner_type == "Organization" {
             if member_orgs.contains(&repo.owner) {
                 member_map
