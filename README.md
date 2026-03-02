@@ -1,6 +1,6 @@
 # Cardman
 
-A desktop Kanban board synced with GitHub issues and pull requests, built entirely in Rust.
+A Kanban board synced with GitHub issues and pull requests, built entirely in Rust. Available as a desktop app and a browser extension.
 
 ## Features
 
@@ -43,17 +43,20 @@ cardman/
 
 | Crate | Purpose |
 |---|---|
-| `cardman-core` | Domain models, card-to-column mapping, GitHub API client (`reqwest`), OAuth helpers |
+| `cardman-core` | Domain models, card-to-column mapping, GitHub API client (`reqwest` native / `gloo-net` wasm), OAuth helpers |
 | `cardman-app` | Dioxus 0.7 desktop UI — sidebar, board, card detail, settings, local JSON cache |
-| `cardman-extension` | Browser extension scaffold (Chromium + Firefox, future) |
+| `cardman-extension` | Browser extension (Chromium + Firefox, MV3) — content script, background worker, popup |
 
 ## Requirements
 
 - **Rust** nightly or stable with edition 2024 support
-- **System dependencies** for Dioxus desktop (WebView):
+- **Desktop app** system dependencies (WebView):
   - **Debian/Ubuntu**: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev`
   - **Arch/Manjaro**: `sudo pacman -S webkit2gtk-4.1 gtk3 libayatana-appindicator xdotool`
   - **macOS / Windows**: no extra dependencies needed
+- **Browser extension** build dependencies:
+  - `rustup target add wasm32-unknown-unknown`
+  - `cargo install wasm-pack`
 
 ## Quick Start
 
@@ -73,6 +76,28 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 On first launch, enter a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` and `read:org` scopes.
+
+## Browser Extension
+
+```zsh
+# Build the extension
+zsh crates/cardman-extension/build.sh
+```
+
+The packaged extension is output to `crates/cardman-extension/dist/`.
+
+**Chrome / Chromium:**
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** → select the `dist/` directory
+
+**Firefox:**
+
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on** → select `dist/manifest.json`
+
+After loading, click the Cardman icon in the toolbar to configure your GitHub PAT. On any GitHub repository page, a **Cardman** tab appears in the repo navigation to show the Kanban board. On pull request pages, a floating **🃏 Link Issues** button lets you search and link issues using `Issue: owner/repo#N` syntax.
 
 ## Local Cache
 

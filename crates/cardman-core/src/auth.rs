@@ -80,6 +80,7 @@ pub struct DeviceCodeResponse {
 }
 
 /// Response from polling `POST https://github.com/login/oauth/access_token`.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Deserialize)]
 struct DevicePollResponse {
     access_token: Option<String>,

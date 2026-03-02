@@ -216,6 +216,7 @@ impl From<GhReview> for Review {
 }
 
 /// GitHub API combined commit status response.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Deserialize)]
 struct GhCombinedStatus {
     state: String,
@@ -961,6 +962,367 @@ impl RestClient {
         self.update_pr(owner, repo, pr_number, None, None, Some("closed"))
             .await?;
         self.delete_branch(owner, repo, branch).await?;
+        Ok(())
+    }
+}
+
+// ── Search response type ─────────────────────────────────────────────
+
+/// GitHub search issues/PRs response wrapper.
+#[derive(Debug, Deserialize)]
+struct GhSearchResult {
+    items: Vec<GhIssue>,
+}
+
+// ── search_issues on RestClient ──────────────────────────────────────
+
+#[cfg(not(target_arch = "wasm32"))]
+impl RestClient {
+    /// Search issues in repositories by query string.
+    ///
+    /// Uses `GET /search/issues?q={query}`. The query should include
+    /// qualifiers like `repo:owner/name` for scoped searches.
+    pub async fn search_issues(&self, query: &str) -> Result<Vec<Issue>, GitHubError> {
+        let encoded: String = query
+            .bytes()
+            .flat_map(|b| match b {
+                b' ' => b"+".to_vec(),
+                b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'-'
+                | b'_'
+                | b'.'
+                | b':'
+                | b'/'
+                | b'#' => vec![b],
+                _ => format!("%{b:02X}").into_bytes(),
+            })
+            .map(|b| b as char)
+            .collect();
+        let resp = self
+            .get(&format!("/search/issues?q={encoded}&per_page=30"))
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        let result: GhSearchResult = self.handle_response(resp).await?;
+        Ok(result
+            .items
+            .into_iter()
+            .filter(|i| i.pull_request.is_none())
+            .map(Into::into)
+            .collect())
+    }
+}
+
+// ── Wasm (gloo-net) client ───────────────────────────────────────────
+
+/// GitHub REST API client using `gloo-net` (wasm targets only).
+///
+/// Mirrors the [`RestClient`] surface for the subset of endpoints needed
+/// by the browser extension: authentication, repository listing, issue/PR
+/// fetching, issue search, and PR body updates.
+#[cfg(target_arch = "wasm32")]
+pub struct WasmClient {
+    token: String,
+    base_url: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WasmClient {
+    /// Create a new wasm GitHub client.
+    ///
+    /// `token` is a GitHub Personal Access Token.
+    pub fn new(token: String) -> Self {
+        Self {
+            token,
+            base_url: "https://api.github.com".to_string(),
+        }
+    }
+
+    /// Build and send an authenticated GET request, returning deserialized JSON.
+    async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, GitHubError> {
+        let url = format!("{}{path}", self.base_url);
+        let resp = gloo_net::http::Request::get(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        Self::handle_response(resp).await
+    }
+
+    /// Build and send an authenticated PATCH request with a JSON body.
+    async fn patch<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T, GitHubError> {
+        let url = format!("{}{path}", self.base_url);
+        let resp = gloo_net::http::Request::patch(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(body)
+            .map_err(|e| GitHubError::Http(e.to_string()))?
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+        Self::handle_response(resp).await
+    }
+
+    /// Handle a gloo-net response, mapping HTTP errors to [`GitHubError`].
+    async fn handle_response<T: serde::de::DeserializeOwned>(
+        resp: gloo_net::http::Response,
+    ) -> Result<T, GitHubError> {
+        let status = resp.status();
+        if status == 401 || status == 403 {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::Auth(text));
+        }
+        if status == 404 {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::NotFound(text));
+        }
+        if status < 200 || status >= 300 {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GitHubError::Http(format!("{status}: {text}")));
+        }
+        resp.json::<T>()
+            .await
+            .map_err(|e| GitHubError::Deserialize(e.to_string()))
+    }
+
+    /// Fetch all pages from a paginated endpoint.
+    async fn paginate<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<Vec<T>, GitHubError> {
+        let mut all = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let separator = if path.contains('?') { '&' } else { '?' };
+            let url = format!("{path}{separator}per_page=100&page={page}");
+            let items: Vec<T> = self.get(&url).await?;
+            if items.is_empty() {
+                break;
+            }
+            all.extend(items);
+            page += 1;
+        }
+        Ok(all)
+    }
+
+    // ── Public API ───────────────────────────────────────────────────
+
+    /// Get the authenticated user.
+    pub async fn get_authenticated_user(&self) -> Result<AuthenticatedUser, GitHubError> {
+        let user: GhAuthUser = self.get("/user").await?;
+        Ok(user.into())
+    }
+
+    /// List all repositories accessible to the authenticated user.
+    pub async fn list_all_repos(&self) -> Result<Vec<Repository>, GitHubError> {
+        let repos: Vec<GhRepo> = self.paginate("/user/repos?type=all&sort=updated").await?;
+        Ok(repos.into_iter().map(Into::into).collect())
+    }
+
+    /// List organizations the authenticated user belongs to.
+    pub async fn list_orgs(&self) -> Result<Vec<Organization>, GitHubError> {
+        let orgs: Vec<GhOrg> = self.paginate("/user/orgs").await?;
+        Ok(orgs
+            .into_iter()
+            .map(|o| Organization {
+                login: o.login,
+                is_main: false,
+            })
+            .collect())
+    }
+
+    /// List open issues for a repository (excludes pull requests).
+    pub async fn list_open_issues(
+        &self,
+        owner: &str,
+        repo: &str,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Issue>, GitHubError> {
+        let path = match since {
+            Some(ts) => {
+                let ts_str = ts.to_rfc3339();
+                format!(
+                    "/repos/{owner}/{repo}/issues?state=open&sort=updated&direction=desc&since={ts_str}"
+                )
+            }
+            None => format!("/repos/{owner}/{repo}/issues?state=open"),
+        };
+        let items: Vec<GhIssue> = self.paginate(&path).await?;
+        Ok(items
+            .into_iter()
+            .filter(|i| i.pull_request.is_none())
+            .map(Into::into)
+            .collect())
+    }
+
+    /// List closed issues for a repository (excludes pull requests).
+    pub async fn list_closed_issues(
+        &self,
+        owner: &str,
+        repo: &str,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Issue>, GitHubError> {
+        let items: Vec<GhIssue> = match since {
+            Some(ts) => {
+                let ts_str = ts.to_rfc3339();
+                let path = format!(
+                    "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&since={ts_str}"
+                );
+                self.paginate(&path).await?
+            }
+            None => {
+                self.get(&format!(
+                    "/repos/{owner}/{repo}/issues?state=closed&sort=updated&direction=desc&per_page=100"
+                ))
+                .await?
+            }
+        };
+        Ok(items
+            .into_iter()
+            .filter(|i| i.pull_request.is_none())
+            .map(Into::into)
+            .collect())
+    }
+
+    /// List open pull requests for a repository (simplified, no review/CI enrichment).
+    pub async fn list_open_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequest>, GitHubError> {
+        let items: Vec<GhPullRequest> = self
+            .paginate(&format!(
+                "/repos/{owner}/{repo}/pulls?state=open&sort=updated&direction=desc"
+            ))
+            .await?;
+        Ok(items
+            .into_iter()
+            .map(|item| {
+                let author = item.user.login;
+                let assignees: Vec<String> = item.assignees.into_iter().map(|u| u.login).collect();
+                let assignees = if assignees.is_empty() {
+                    vec![author.clone()]
+                } else {
+                    assignees
+                };
+                PullRequest {
+                    number: item.number,
+                    title: item.title,
+                    body: item.body,
+                    draft: item.draft,
+                    author,
+                    assignees,
+                    requested_reviewers: item
+                        .requested_reviewers
+                        .into_iter()
+                        .map(|u| u.login)
+                        .collect(),
+                    reviews: Vec::new(),
+                    ci_status: CiStatus::Pending,
+                    merged: false,
+                    closed: false,
+                    branch: item.head.branch_ref,
+                    labels: item.labels.into_iter().map(Into::into).collect(),
+                    updated_at: item.updated_at,
+                }
+            })
+            .collect())
+    }
+
+    /// List closed pull requests for a repository.
+    pub async fn list_closed_prs(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequest>, GitHubError> {
+        let items: Vec<GhPullRequest> = self
+            .get(&format!(
+                "/repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100"
+            ))
+            .await?;
+        Ok(items
+            .into_iter()
+            .map(|item| {
+                let merged = item.merged_at.is_some();
+                let author = item.user.login;
+                let assignees: Vec<String> = item.assignees.into_iter().map(|u| u.login).collect();
+                let assignees = if assignees.is_empty() {
+                    vec![author.clone()]
+                } else {
+                    assignees
+                };
+                PullRequest {
+                    number: item.number,
+                    title: item.title,
+                    body: None,
+                    draft: false,
+                    author,
+                    assignees,
+                    requested_reviewers: Vec::new(),
+                    reviews: Vec::new(),
+                    ci_status: CiStatus::Pending,
+                    merged,
+                    closed: !merged,
+                    branch: item.head.branch_ref,
+                    labels: item.labels.into_iter().map(Into::into).collect(),
+                    updated_at: item.updated_at,
+                }
+            })
+            .collect())
+    }
+
+    /// Search issues in repositories by query string.
+    ///
+    /// Uses `GET /search/issues?q={query}`. The query should include
+    /// qualifiers like `repo:owner/name` for scoped searches.
+    pub async fn search_issues(&self, query: &str) -> Result<Vec<Issue>, GitHubError> {
+        let encoded = js_sys::encode_uri_component(query);
+        let result: GhSearchResult = self
+            .get(&format!("/search/issues?q={encoded}&per_page=30"))
+            .await?;
+        Ok(result
+            .items
+            .into_iter()
+            .filter(|i| i.pull_request.is_none())
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Update a pull request body.
+    pub async fn update_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        title: Option<&str>,
+        body: Option<&str>,
+        state: Option<&str>,
+    ) -> Result<(), GitHubError> {
+        let mut payload = serde_json::Map::new();
+        if let Some(t) = title {
+            payload.insert("title".into(), serde_json::Value::String(t.to_string()));
+        }
+        if let Some(b) = body {
+            payload.insert("body".into(), serde_json::Value::String(b.to_string()));
+        }
+        if let Some(s) = state {
+            payload.insert("state".into(), serde_json::Value::String(s.to_string()));
+        }
+        let _resp: serde_json::Value = self
+            .patch(
+                &format!("/repos/{owner}/{repo}/pulls/{pr_number}"),
+                &serde_json::Value::Object(payload),
+            )
+            .await?;
         Ok(())
     }
 }

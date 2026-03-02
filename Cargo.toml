@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cardman-core", "crates/cardman-app", "crates/cardman-extension"]
+members = ["crates/cardman-core", "crates/cardman-app", "crates/cardman-extension", "crates/cardman-wasm-bridge"]
 resolver = "2"
 
 [workspace.package]
