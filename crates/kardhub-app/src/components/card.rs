@@ -27,6 +27,9 @@ pub struct CardItemProps {
     /// Cached members for resolving login → avatar.
     #[props(default = Vec::new())]
     pub members: Vec<User>,
+    /// Hidden PR cards (for looking up full data on mini-card click).
+    #[props(default = Vec::new())]
+    pub hidden_cards: Vec<Card>,
     /// Callback when the card is clicked.
     pub on_click: EventHandler<Card>,
 }
@@ -130,6 +133,50 @@ pub fn CardItem(props: CardItemProps) -> Element {
                                     title: "{u.login}",
                                     width: "20",
                                     height: "20",
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Linked PRs (only shown on issue cards)
+            if !card.linked_prs.is_empty() {
+                div { class: "card-linked-prs",
+                    for lp in &card.linked_prs {
+                        {
+                            let status_class = if lp.merged {
+                                "merged"
+                            } else if lp.closed {
+                                "closed"
+                            } else if lp.draft {
+                                "draft"
+                            } else {
+                                "open"
+                            };
+                            // Look up the full hidden PR card for the detail panel.
+                            let full_pr_card = props.hidden_cards.iter().find(|c| {
+                                c.owner == lp.owner
+                                    && c.repo == lp.repo
+                                    && matches!(&c.source, CardSource::PullRequest(pr) if pr.number == lp.number)
+                            }).cloned();
+                            let on_click = props.on_click;
+                            rsx! {
+                                div {
+                                    class: "card-linked-pr {status_class}",
+                                    onclick: move |e| {
+                                        e.stop_propagation();
+                                        if let Some(ref pr_card) = full_pr_card {
+                                            on_click.call(pr_card.clone());
+                                        }
+                                    },
+                                    span { class: "card-linked-pr-icon", "⤴" }
+                                    span { class: "card-linked-pr-number", "#{lp.number}" }
+                                    span { class: "card-linked-pr-title", "{lp.title}" }
+                                    span {
+                                        class: "card-linked-pr-status {status_class}",
+                                        "{lp.column.emoji} {lp.column.name}"
+                                    }
                                 }
                             }
                         }

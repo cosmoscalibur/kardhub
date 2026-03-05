@@ -726,7 +726,7 @@ impl RestClient {
                 PullRequest {
                     number: item.number,
                     title: item.title,
-                    body: None, // Closed PRs: no body cached
+                    body: item.body,
                     draft: false,
                     author,
                     assignees,
@@ -1277,7 +1277,7 @@ impl WasmClient {
                 PullRequest {
                     number: item.number,
                     title: item.title,
-                    body: None,
+                    body: item.body,
                     draft: false,
                     author,
                     assignees,

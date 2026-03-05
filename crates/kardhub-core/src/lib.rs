@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod github;
+pub mod linking;
 pub mod mapping;
 pub mod markdown;
 pub mod models;

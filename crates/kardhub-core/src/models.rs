@@ -214,6 +214,27 @@ impl Priority {
     }
 }
 
+/// Summary of a PR linked to an issue card (for embedded display).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedPr {
+    /// Repository owner of the PR (may differ from the issue's owner).
+    pub owner: String,
+    /// Repository name of the PR (may differ from the issue's repo).
+    pub repo: String,
+    /// PR number.
+    pub number: u64,
+    /// PR title.
+    pub title: String,
+    /// The column the PR was mapped to.
+    pub column: Column,
+    /// Whether the PR is merged.
+    pub merged: bool,
+    /// Whether the PR is closed (without merge).
+    pub closed: bool,
+    /// Whether the PR is a draft.
+    pub draft: bool,
+}
+
 /// Source of a Kanban card — either an issue or a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -238,6 +259,12 @@ pub struct Card {
     pub column: Column,
     /// Priority (from `#N` labels). `None` if no priority label is present.
     pub priority: Option<Priority>,
+    /// PRs linked to this card (only populated for Issue cards).
+    #[serde(default)]
+    pub linked_prs: Vec<LinkedPr>,
+    /// Whether this card is hidden from board rendering (e.g. a PR absorbed by an issue).
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// A column on the Kanban board.

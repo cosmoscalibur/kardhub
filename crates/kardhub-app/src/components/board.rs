@@ -94,11 +94,19 @@ pub fn Board(props: BoardProps) -> Element {
                             props
                                 .cards
                                 .iter()
-                                .filter(|c| c.column.name == *col_name && !is_closed(c))
+                                .filter(|c| !c.hidden && c.column.name == *col_name && !is_closed(c))
                                 .collect()
                         };
                         col_cards.sort_by(|a, b| a.priority.cmp(&b.priority));
                         let count = col_cards.len();
+
+                        // Collect hidden PR cards for detail panel lookup.
+                        let hidden: Vec<Card> = props
+                            .cards
+                            .iter()
+                            .filter(|c| c.hidden)
+                            .cloned()
+                            .collect();
 
                         rsx! {
                             div { class: "column",
@@ -117,6 +125,7 @@ pub fn Board(props: BoardProps) -> Element {
                                                 CardItem {
                                                     card: card.clone(),
                                                     members: props.members.clone(),
+                                                    hidden_cards: hidden.clone(),
                                                     on_click: move |c: Card| on_card_click.call(c),
                                                 }
                                             }

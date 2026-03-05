@@ -98,7 +98,7 @@ pub fn Dashboard(props: DashboardProps) -> Element {
                 {
                     let col_cards: Vec<&Card> = all_cards
                         .iter()
-                        .filter(|c| c.column.name == col.name && c.column.emoji == col.emoji)
+                        .filter(|c| !c.hidden && c.column.name == col.name && c.column.emoji == col.emoji)
                         .collect();
                     rsx! {
                         BoardColumn {
@@ -170,6 +170,41 @@ fn BoardColumn(props: BoardColumnProps) -> Element {
                                                 class: "kardhub-label",
                                                 style: "background:#{label.color}",
                                                 "{label.name}",
+                                            }
+                                        }
+                                    }
+                                }
+                                if !card.linked_prs.is_empty() {
+                                    div { class: "kardhub-card-linked-prs",
+                                        for lp in &card.linked_prs {
+                                            {
+                                                let lp_url = format!(
+                                                    "https://github.com/{}/{}/pull/{}",
+                                                    lp.owner, lp.repo, lp.number,
+                                                );
+                                                let st = if lp.merged {
+                                                    "merged"
+                                                } else if lp.closed {
+                                                    "closed"
+                                                } else if lp.draft {
+                                                    "draft"
+                                                } else {
+                                                    "open"
+                                                };
+                                                rsx! {
+                                                    a {
+                                                        class: "kardhub-card-linked-pr {st}",
+                                                        href: "{lp_url}",
+                                                        target: "_self",
+                                                        span { class: "kardhub-lp-icon", "⤴" }
+                                                        span { class: "kardhub-lp-num", "#{lp.number}" }
+                                                        span { class: "kardhub-lp-title", "{lp.title}" }
+                                                        span {
+                                                            class: "kardhub-lp-status {st}",
+                                                            "{lp.column.emoji} {lp.column.name}"
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -387,5 +422,26 @@ fn parse_cards_from_js(data: wasm_bindgen::JsValue, owner: &str, repo: &str) -> 
     }
 
     cards.sort_by(|a, b| a.priority.cmp(&b.priority));
+    kardhub_core::linking::link_cards(&mut cards);
+
+    // Hide PR cards that were linked to an issue.
+    let linked: std::collections::HashSet<(String, String, u64)> = cards
+        .iter()
+        .flat_map(|c| {
+            c.linked_prs
+                .iter()
+                .map(|lp| (lp.owner.clone(), lp.repo.clone(), lp.number))
+        })
+        .collect();
+    if !linked.is_empty() {
+        for card in cards.iter_mut() {
+            if let CardSource::PullRequest(pr) = &card.source {
+                if linked.contains(&(card.owner.clone(), card.repo.clone(), pr.number)) {
+                    card.hidden = true;
+                }
+            }
+        }
+    }
+
     cards
 }

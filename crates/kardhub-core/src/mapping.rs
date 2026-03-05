@@ -227,6 +227,8 @@ pub fn map_card(owner: &str, repo: &str, source: CardSource, config: &MappingCon
         priority: extract_priority(labels),
         column: column_kind.to_column(),
         source,
+        linked_prs: Vec::new(),
+        hidden: false,
     }
 }
 

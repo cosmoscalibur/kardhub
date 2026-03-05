@@ -158,6 +158,7 @@ fn app() -> Element {
                                 }
                             }
                             all.sort_by(|a, b| a.priority.cmp(&b.priority));
+                            link_and_hide_prs(&mut all);
                             if let AppState::Dashboard { ref mut cards, .. } = *state.write() {
                                 *cards = all;
                             }
@@ -397,6 +398,7 @@ fn app() -> Element {
                                         }
                                     }
                                     rebuilt.sort_by(|a, b| a.priority.cmp(&b.priority));
+                                    link_and_hide_prs(&mut rebuilt);
 
                                     if let AppState::Dashboard {
                                         ref mut selected_repos,
@@ -442,6 +444,7 @@ fn app() -> Element {
                                             cards.sort_by(|a, b| {
                                                 a.priority.cmp(&b.priority)
                                             });
+                                            link_and_hide_prs(cards);
                                         }
 
                                         // Skip sync if cache is fresh (< 3h)
@@ -497,6 +500,7 @@ fn app() -> Element {
                                                 all.sort_by(|a, b| {
                                                     a.priority.cmp(&b.priority)
                                                 });
+                                                link_and_hide_prs(&mut all);
                                                 *cards = all;
                                             }
                                             board_loading.set(false);
@@ -1040,6 +1044,35 @@ async fn build_source_map(token: &str, user_login: &str) -> SourceMap {
             member: member_map,
             collaborator: collaborator_map,
         },
+    }
+}
+
+/// Link PR cards to issue cards and mark absorbed PR cards as hidden.
+///
+/// After this call:
+/// - Issue cards may have `linked_prs` populated
+/// - PR cards that reference a known issue have `hidden = true`
+fn link_and_hide_prs(cards: &mut [Card]) {
+    kardhub_core::linking::link_cards(cards);
+
+    // Collect the set of linked PR (owner, repo, number) tuples.
+    let linked: std::collections::HashSet<(String, String, u64)> = cards
+        .iter()
+        .flat_map(|c| {
+            c.linked_prs
+                .iter()
+                .map(|lp| (lp.owner.clone(), lp.repo.clone(), lp.number))
+        })
+        .collect();
+
+    if !linked.is_empty() {
+        for card in cards.iter_mut() {
+            if let CardSource::PullRequest(pr) = &card.source
+                && linked.contains(&(card.owner.clone(), card.repo.clone(), pr.number))
+            {
+                card.hidden = true;
+            }
+        }
     }
 }
 
