@@ -73,6 +73,23 @@ async function apiPatch(path, token, body) {
 }
 
 /**
+ * Make an authenticated DELETE request to the GitHub API.
+ * @param {string} path - API path
+ * @param {string} token - GitHub PAT
+ */
+async function apiDelete(path, token) {
+    const resp = await fetch(`${API_BASE}${path}`, {
+        method: "DELETE",
+        headers: { ...HEADERS, Authorization: `Bearer ${token}` },
+    });
+    // 204 No Content is the expected success response for DELETE.
+    if (!resp.ok && resp.status !== 204) {
+        const text = await resp.text();
+        throw new Error(`GitHub API ${resp.status}: ${text}`);
+    }
+}
+
+/**
  * Paginate a GitHub API endpoint collecting all pages.
  * @param {string} path - API path with query params
  * @param {string} token - GitHub PAT
@@ -212,6 +229,16 @@ async function handleMessage(msg) {
             await ensureWasm();
             const { reposJson, orgsJson } = msg;
             return JSON.parse(classify_repos_json(reposJson, orgsJson));
+        }
+
+        case "deleteBranch": {
+            if (!token) throw new Error("No token configured");
+            const { owner, repo, branch } = msg;
+            await apiDelete(
+                `/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`,
+                token
+            );
+            return { deleted: true };
         }
 
         default:

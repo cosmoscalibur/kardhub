@@ -727,7 +727,77 @@
         injectDashboardTab(page);
         if (page.type === "pr") {
             injectIssueLinker(page);
+            observePrState();
         }
+    }
+
+    // ── PR close/merge observer ─────────────────────────────────────────
+
+    let prStateObserver = null;
+
+    /** Watch for PR state changes (close/merge) and refresh the board. */
+    function observePrState() {
+        if (prStateObserver) {
+            prStateObserver.disconnect();
+            prStateObserver = null;
+        }
+
+        // GitHub renders PR state in an element with "State" in its class
+        // or in the timeline when the merge/close action happens.
+        const stateEl =
+            document.querySelector(".State") ||
+            document.querySelector("[title='Status: Merged']") ||
+            document.querySelector("[title='Status: Closed']");
+
+        const target = stateEl?.closest(".gh-header-meta") ||
+            document.querySelector(".js-discussion") ||
+            document.querySelector("#partial-discussion-header");
+
+        if (!target) return;
+
+        let lastState = stateEl?.textContent?.trim().toLowerCase() || "";
+
+        prStateObserver = new MutationObserver(() => {
+            const el =
+                document.querySelector(".State") ||
+                document.querySelector("[title='Status: Merged']") ||
+                document.querySelector("[title='Status: Closed']");
+            const newState = el?.textContent?.trim().toLowerCase() || "";
+            if (newState && newState !== lastState) {
+                lastState = newState;
+                // PR was closed/merged — delete head branch and refresh board.
+                const page = detectPage();
+                if (page && page.type === "pr") {
+                    deletePrBranch(page);
+                }
+                if (dashboardOpen) {
+                    loadBoard();
+                }
+            }
+        });
+
+        prStateObserver.observe(target, { childList: true, subtree: true, characterData: true });
+    }
+
+    /**
+     * Extract the head branch name from the PR page and delete it.
+     * GitHub shows the branch in `.head-ref` or the commit ref span.
+     */
+    function deletePrBranch(page) {
+        // GitHub renders the head branch in a `.head-ref` element.
+        const headRefEl = document.querySelector(".head-ref a, .head-ref span");
+        const branch = headRefEl?.textContent?.trim();
+        if (!branch) return;
+
+        bgMessage({
+            type: "deleteBranch",
+            owner: page.owner,
+            repo: page.repo,
+            branch,
+        }).catch((err) => {
+            // Branch may already be deleted or protected — silently ignore.
+            console.warn("[KardHub] Branch delete failed:", err.message);
+        });
     }
 
     init();
@@ -742,6 +812,10 @@
                 if (el) el.remove();
             }
         );
+        if (prStateObserver) {
+            prStateObserver.disconnect();
+            prStateObserver = null;
+        }
         selectedRepos = [];
         classifiedData = null;
         dataLoaded = false;

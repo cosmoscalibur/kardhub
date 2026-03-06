@@ -671,21 +671,35 @@ fn app() -> Element {
                                 },
                                 on_closed: move |updated_card: Card| {
                                     selected_card.set(None);
-                                    // Move card to closed state locally (no sync).
+                                    // Remap the closed card to the correct column.
+                                    let config = kardhub_core::mapping::MappingConfig::default();
+                                    let remapped = kardhub_core::mapping::map_card(
+                                        &updated_card.owner,
+                                        &updated_card.repo,
+                                        updated_card.source.clone(),
+                                        &config,
+                                    );
                                     if let AppState::Dashboard { cards: ref mut c, .. } = *state.write()
                                         && let Some(pos) = c.iter().position(|card| {
                                             let n1 = match &card.source {
                                                 CardSource::Issue(i) => i.number,
                                                 CardSource::PullRequest(p) => p.number,
                                             };
-                                            let n2 = match &updated_card.source {
+                                            let n2 = match &remapped.source {
                                                 CardSource::Issue(i) => i.number,
                                                 CardSource::PullRequest(p) => p.number,
                                             };
-                                            n1 == n2 && card.owner == updated_card.owner && card.repo == updated_card.repo
+                                            n1 == n2 && card.owner == remapped.owner && card.repo == remapped.repo
                                         })
                                     {
-                                        c[pos] = updated_card;
+                                        c[pos] = remapped.clone();
+                                        link_and_hide_prs(c);
+                                        // Persist per-repo cache.
+                                        let repo_cards: Vec<_> = c.iter()
+                                            .filter(|card| card.owner == remapped.owner && card.repo == remapped.repo)
+                                            .cloned()
+                                            .collect();
+                                        save_cards(&remapped.owner, &remapped.repo, &repo_cards);
                                     }
                                 },
                                 on_synced: move |fresh_card: Card| {
