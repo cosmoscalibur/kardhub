@@ -112,6 +112,12 @@ pub fn parse_issue_refs(body: &str, default_owner: &str, default_repo: &str) -> 
 ///    (smallest `sort_order`) linked PR column. When multiple PRs link
 ///    to the same issue, the least-advanced PR determines the column.
 pub fn link_cards(cards: &mut [Card]) {
+    // Reset previous linking state so the function is idempotent.
+    for card in cards.iter_mut() {
+        card.linked_prs.clear();
+        card.hidden = false;
+    }
+
     // Intermediate struct to avoid borrow conflicts.
     struct PrLink {
         issue_idx: usize,
@@ -137,12 +143,18 @@ pub fn link_cards(cards: &mut [Card]) {
             continue;
         }
 
-        let (pr_number, pr_title, pr_merged, pr_closed, pr_draft) = match &cards[pr_idx].source {
-            CardSource::PullRequest(pr) => {
-                (pr.number, pr.title.clone(), pr.merged, pr.closed, pr.draft)
-            }
-            _ => unreachable!(),
-        };
+        let (pr_number, pr_title, pr_merged, pr_closed, pr_draft, pr_assignees) =
+            match &cards[pr_idx].source {
+                CardSource::PullRequest(pr) => (
+                    pr.number,
+                    pr.title.clone(),
+                    pr.merged,
+                    pr.closed,
+                    pr.draft,
+                    pr.assignees.clone(),
+                ),
+                _ => unreachable!(),
+            };
         let pr_column = cards[pr_idx].column.clone();
         let pr_sort = pr_column.sort_order;
 
@@ -163,6 +175,7 @@ pub fn link_cards(cards: &mut [Card]) {
                         merged: pr_merged,
                         closed: pr_closed,
                         draft: pr_draft,
+                        assignees: pr_assignees.clone(),
                     },
                     sort_order: pr_sort,
                 });

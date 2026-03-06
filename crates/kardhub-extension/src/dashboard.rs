@@ -31,12 +31,14 @@ pub fn Dashboard(props: DashboardProps) -> Element {
     let mut cards = use_signal(Vec::<Card>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| Option::<String>::None);
+    let mut refresh_count = use_signal(|| 0u32);
 
     let owner = props.owner.clone();
     let repo = props.repo.clone();
 
-    // Fetch cards on mount
+    // Fetch cards on mount and whenever refresh_count changes.
     use_effect(move || {
+        let _trigger = refresh_count();
         let owner = owner.clone();
         let repo = repo.clone();
         spawn(async move {
@@ -94,6 +96,16 @@ pub fn Dashboard(props: DashboardProps) -> Element {
 
     rsx! {
         div { class: "kardhub-board",
+            div { class: "kardhub-board-actions",
+                button {
+                    class: "kardhub-refresh-btn",
+                    title: "Refresh board",
+                    onclick: move |_| {
+                        refresh_count.set(refresh_count() + 1);
+                    },
+                    "⟳"
+                }
+            }
             for col in columns.iter() {
                 {
                     let col_cards: Vec<&Card> = all_cards
@@ -199,9 +211,17 @@ fn BoardColumn(props: BoardColumnProps) -> Element {
                                                         span { class: "kardhub-lp-icon", "⤴" }
                                                         span { class: "kardhub-lp-num", "#{lp.number}" }
                                                         span { class: "kardhub-lp-title", "{lp.title}" }
-                                                        span {
-                                                            class: "kardhub-lp-status {st}",
-                                                            "{lp.column.emoji} {lp.column.name}"
+                                                        if !lp.assignees.is_empty() {
+                                                            div { class: "kardhub-lp-assignees",
+                                                                for login in &lp.assignees {
+                                                                    img {
+                                                                        class: "kardhub-lp-avatar",
+                                                                        src: "https://github.com/{login}.png?size=32",
+                                                                        alt: "{login}",
+                                                                        title: "{login}",
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -435,10 +455,10 @@ fn parse_cards_from_js(data: wasm_bindgen::JsValue, owner: &str, repo: &str) -> 
         .collect();
     if !linked.is_empty() {
         for card in cards.iter_mut() {
-            if let CardSource::PullRequest(pr) = &card.source {
-                if linked.contains(&(card.owner.clone(), card.repo.clone(), pr.number)) {
-                    card.hidden = true;
-                }
+            if let CardSource::PullRequest(pr) = &card.source
+                && linked.contains(&(card.owner.clone(), card.repo.clone(), pr.number))
+            {
+                card.hidden = true;
             }
         }
     }

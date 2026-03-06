@@ -140,6 +140,41 @@ pub fn CardItem(props: CardItemProps) -> Element {
                 }
             }
 
+            // Review semaphore (PR cards only): colored circles per reviewer.
+            if let CardSource::PullRequest(pr) = &card.source {
+                {
+                    use kardhub_core::models::ReviewState;
+                    // Build unified reviewer list: submitted reviews + pending.
+                    let mut dots: Vec<(&str, &str)> = Vec::new(); // (login, css_class)
+                    for review in &pr.reviews {
+                        let cls = match review.state {
+                            ReviewState::Approved => "dot-approved",
+                            ReviewState::ChangesRequested => "dot-changes",
+                            _ => continue,
+                        };
+                        dots.push((&review.user.login, cls));
+                    }
+                    for login in &pr.requested_reviewers {
+                        // Skip if already in reviews.
+                        if !dots.iter().any(|(l, _)| *l == login.as_str()) {
+                            dots.push((login, "dot-pending"));
+                        }
+                    }
+                    rsx! {
+                        if !dots.is_empty() {
+                            div { class: "card-review-dots",
+                                for (login, cls) in &dots {
+                                    span {
+                                        class: "review-dot {cls}",
+                                        title: "{login}",
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Linked PRs (only shown on issue cards)
             if !card.linked_prs.is_empty() {
                 div { class: "card-linked-prs",
@@ -173,9 +208,17 @@ pub fn CardItem(props: CardItemProps) -> Element {
                                     span { class: "card-linked-pr-icon", "⤴" }
                                     span { class: "card-linked-pr-number", "#{lp.number}" }
                                     span { class: "card-linked-pr-title", "{lp.title}" }
-                                    span {
-                                        class: "card-linked-pr-status {status_class}",
-                                        "{lp.column.emoji} {lp.column.name}"
+                                    if !lp.assignees.is_empty() {
+                                        div { class: "card-linked-pr-assignees",
+                                            for login in &lp.assignees {
+                                                img {
+                                                    class: "card-linked-pr-avatar",
+                                                    src: "https://github.com/{login}.png?size=32",
+                                                    alt: "{login}",
+                                                    title: "{login}",
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

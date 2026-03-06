@@ -688,6 +688,36 @@ fn app() -> Element {
                                         c[pos] = updated_card;
                                     }
                                 },
+                                on_synced: move |fresh_card: Card| {
+                                    if let AppState::Dashboard { cards: ref mut c, .. } = *state.write() {
+                                        // Replace the stale card.
+                                        if let Some(pos) = c.iter().position(|card| {
+                                            let n1 = match &card.source {
+                                                CardSource::Issue(i) => i.number,
+                                                CardSource::PullRequest(p) => p.number,
+                                            };
+                                            let n2 = match &fresh_card.source {
+                                                CardSource::Issue(i) => i.number,
+                                                CardSource::PullRequest(p) => p.number,
+                                            };
+                                            n1 == n2 && card.owner == fresh_card.owner && card.repo == fresh_card.repo
+                                        }) {
+                                            c[pos] = fresh_card.clone();
+                                        }
+                                        // Reapply linking.
+                                        link_and_hide_prs(c);
+                                        // Persist updated cards per-repo to local cache.
+                                        let o = &fresh_card.owner;
+                                        let r = &fresh_card.repo;
+                                        let repo_cards: Vec<_> = c.iter()
+                                            .filter(|card| card.owner == *o && card.repo == *r)
+                                            .cloned()
+                                            .collect();
+                                        save_cards(o, r, &repo_cards);
+                                    }
+                                    // Update the detail panel with fresh data.
+                                    selected_card.set(Some(fresh_card));
+                                },
                             }
                         }
 

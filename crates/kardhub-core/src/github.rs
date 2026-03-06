@@ -630,8 +630,8 @@ impl RestClient {
                 .map(|u| u.login)
                 .collect();
 
-            // Draft or no requested reviewers → skip reviews & CI
-            let (reviews, ci) = if item.draft || requested.is_empty() {
+            // Draft PRs → skip reviews & CI
+            let (reviews, ci) = if item.draft {
                 (Vec::new(), CiStatus::Pending)
             } else {
                 let r = self
@@ -744,6 +744,8 @@ impl RestClient {
     }
 
     /// Get reviews for a pull request.
+    ///
+    /// Deduplicates by user login, keeping the latest review per reviewer.
     pub async fn get_reviews(
         &self,
         owner: &str,
@@ -753,7 +755,13 @@ impl RestClient {
         let reviews: Vec<GhReview> = self
             .paginate(&format!("/repos/{owner}/{repo}/pulls/{pr_number}/reviews"))
             .await?;
-        Ok(reviews.into_iter().map(Into::into).collect())
+        let all: Vec<Review> = reviews.into_iter().map(Into::into).collect();
+        // Keep the latest review per user (last entry wins).
+        let mut seen = std::collections::HashMap::new();
+        for review in all {
+            seen.insert(review.user.login.clone(), review);
+        }
+        Ok(seen.into_values().collect())
     }
 
     /// Get the combined CI status for a ref (branch or SHA).
@@ -975,6 +983,92 @@ impl RestClient {
             .await?;
         self.delete_branch(owner, repo, branch).await?;
         Ok(())
+    }
+
+    /// Fetch a single issue by number.
+    pub async fn get_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Issue, GitHubError> {
+        let item: GhIssue = self
+            .handle_response(
+                self.get(&format!("/repos/{owner}/{repo}/issues/{number}"))
+                    .send()
+                    .await
+                    .map_err(|e| GitHubError::Http(e.to_string()))?,
+            )
+            .await?;
+        Ok(item.into())
+    }
+
+    /// Fetch a single pull request by number, enriched with reviews and CI.
+    pub async fn get_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<PullRequest, GitHubError> {
+        let item: GhPullRequest = self
+            .handle_response(
+                self.get(&format!("/repos/{owner}/{repo}/pulls/{number}"))
+                    .send()
+                    .await
+                    .map_err(|e| GitHubError::Http(e.to_string()))?,
+            )
+            .await?;
+
+        let merged = item.merged_at.is_some();
+        let closed = item.state == "closed" && !merged;
+
+        let requested: Vec<String> = item
+            .requested_reviewers
+            .into_iter()
+            .map(|u| u.login)
+            .collect();
+
+        let (reviews, ci) = if item.draft || merged || closed {
+            (Vec::new(), CiStatus::Pending)
+        } else {
+            let r = self
+                .get_reviews(owner, repo, item.number)
+                .await
+                .unwrap_or_default();
+            let ci = if r.is_empty() {
+                CiStatus::Pending
+            } else {
+                self.get_ci_status(owner, repo, &item.head.branch_ref)
+                    .await
+                    .unwrap_or(CiStatus::Pending)
+            };
+            (r, ci)
+        };
+
+        let author = item.user.login;
+        let assignees: Vec<String> = item.assignees.into_iter().map(|u| u.login).collect();
+        let assignees = if assignees.is_empty() {
+            vec![author.clone()]
+        } else {
+            assignees
+        };
+
+        Ok(PullRequest {
+            number: item.number,
+            title: item.title,
+            body: item.body,
+            draft: item.draft,
+            author,
+            assignees,
+            requested_reviewers: requested,
+            reviews,
+            ci_status: ci,
+            merged,
+            closed,
+            branch: item.head.branch_ref,
+            labels: item.labels.into_iter().map(Into::into).collect(),
+            updated_at: item.updated_at,
+        })
     }
 }
 
@@ -1338,6 +1432,60 @@ impl WasmClient {
             )
             .await?;
         Ok(())
+    }
+
+    /// Fetch a single issue by number.
+    pub async fn get_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Issue, GitHubError> {
+        let item: GhIssue = self
+            .get(&format!("/repos/{owner}/{repo}/issues/{number}"))
+            .await?;
+        Ok(item.into())
+    }
+
+    /// Fetch a single pull request by number (no review/CI enrichment).
+    pub async fn get_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<PullRequest, GitHubError> {
+        let item: GhPullRequest = self
+            .get(&format!("/repos/{owner}/{repo}/pulls/{number}"))
+            .await?;
+        let merged = item.merged_at.is_some();
+        let closed = item.state == "closed" && !merged;
+        let author = item.user.login;
+        let assignees: Vec<String> = item.assignees.into_iter().map(|u| u.login).collect();
+        let assignees = if assignees.is_empty() {
+            vec![author.clone()]
+        } else {
+            assignees
+        };
+        Ok(PullRequest {
+            number: item.number,
+            title: item.title,
+            body: item.body,
+            draft: item.draft,
+            author,
+            assignees,
+            requested_reviewers: item
+                .requested_reviewers
+                .into_iter()
+                .map(|u| u.login)
+                .collect(),
+            reviews: Vec::new(),
+            ci_status: CiStatus::Pending,
+            merged,
+            closed,
+            branch: item.head.branch_ref,
+            labels: item.labels.into_iter().map(Into::into).collect(),
+            updated_at: item.updated_at,
+        })
     }
 }
 

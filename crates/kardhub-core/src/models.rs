@@ -233,6 +233,8 @@ pub struct LinkedPr {
     pub closed: bool,
     /// Whether the PR is a draft.
     pub draft: bool,
+    /// PR assignee logins.
+    pub assignees: Vec<String>,
 }
 
 /// Source of a Kanban card — either an issue or a pull request.

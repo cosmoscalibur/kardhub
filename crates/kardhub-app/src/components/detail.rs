@@ -36,6 +36,8 @@ pub struct CardDetailProps {
     pub on_close: EventHandler<()>,
     /// Callback when the issue/PR is closed (provides updated card for local move).
     pub on_closed: EventHandler<Card>,
+    /// Callback when fresh data is fetched from the API (card re-synced).
+    pub on_synced: EventHandler<Card>,
 }
 
 /// Right-side detail panel showing full card information.
@@ -160,6 +162,49 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let mut editing_assignees = use_signal(|| false);
     let mut selected_assignees: Signal<Vec<String>> = use_signal(|| assignee_logins.to_vec());
     let mut saving_assignees = use_signal(|| false);
+    let mut syncing = use_signal(|| true);
+
+    // Auto-sync: fetch fresh data from the API on mount.
+    {
+        let token = token.clone();
+        let owner = owner.clone();
+        let repo = repo.clone();
+        let on_synced = props.on_synced;
+
+        use_effect(move || {
+            let token = token.clone();
+            let owner = owner.clone();
+            let repo = repo.clone();
+            spawn(async move {
+                syncing.set(true);
+                let client = RestClient::new(token);
+                let config = kardhub_core::mapping::MappingConfig::default();
+                let result = if is_pr {
+                    client.get_pr(&owner, &repo, number).await.map(|pr| {
+                        kardhub_core::mapping::map_card(
+                            &owner,
+                            &repo,
+                            CardSource::PullRequest(pr),
+                            &config,
+                        )
+                    })
+                } else {
+                    client.get_issue(&owner, &repo, number).await.map(|issue| {
+                        kardhub_core::mapping::map_card(
+                            &owner,
+                            &repo,
+                            CardSource::Issue(issue),
+                            &config,
+                        )
+                    })
+                };
+                if let Ok(fresh) = result {
+                    on_synced.call(fresh);
+                }
+                syncing.set(false);
+            });
+        });
+    }
 
     // Lazy-load comments.
     {
@@ -221,6 +266,9 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
             // Header
             div { class: "detail-header",
                 span { class: "detail-type", "{type_label}" }
+                if syncing() {
+                    span { class: "detail-syncing", "⟳" }
+                }
                 div { class: "detail-actions",
                     button {
                         class: "detail-action-btn",
@@ -605,12 +653,27 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
 
                 // PR-specific: reviewers and CI
                 if let CardSource::PullRequest(pr) = &card.source {
-                    if !pr.requested_reviewers.is_empty() {
-                        div { class: "detail-section",
-                            div { class: "detail-section-title", "Reviewers" }
-                            div { class: "detail-reviewers",
-                                for reviewer_login in &pr.requested_reviewers {
-                                    {render_reviewer_badge(reviewer_login, &pr.reviews, &members_list)}
+                    // Build unified reviewer list: submitted reviews + pending.
+                    {
+                        use std::collections::HashSet;
+                        let reviewed: HashSet<&str> = pr.reviews.iter().map(|r| r.user.login.as_str()).collect();
+                        let has_any = !pr.reviews.is_empty() || !pr.requested_reviewers.is_empty();
+                        rsx! {
+                            if has_any {
+                                div { class: "detail-section",
+                                    div { class: "detail-section-title", "Reviewers" }
+                                    div { class: "detail-reviewers",
+                                        // Submitted reviews
+                                        for review in &pr.reviews {
+                                            {render_reviewer_badge(&review.user.login, &pr.reviews, &members_list)}
+                                        }
+                                        // Pending reviewers (not yet submitted)
+                                        for login in &pr.requested_reviewers {
+                                            if !reviewed.contains(login.as_str()) {
+                                                {render_reviewer_badge(login, &pr.reviews, &members_list)}
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
