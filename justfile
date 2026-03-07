@@ -1,15 +1,23 @@
 default:
     @just --list
 
-setup:
-    @echo "Installing system dependencies (Debian/Ubuntu)..."
-    sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
-    @echo "Building workspace..."
+setup distro="debian":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Installing system dependencies..."
+    if [ "{{distro}}" = "debian" ]; then
+        sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+    elif [ "{{distro}}" = "arch" ]; then
+        sudo pacman -S --needed webkit2gtk-4.1 gtk3 libayatana-appindicator xdotool
+    else
+        echo "Unsupported distro: {{distro}}. Use 'debian' or 'arch'." && exit 1
+    fi
+    echo "Building workspace..."
     cargo build --workspace
-    @echo "Installing pre-commit hooks..."
+    echo "Installing pre-commit hooks..."
     pip install pre-commit
     pre-commit install
-    @echo "Setup complete."
+    echo "Setup complete."
 
 build:
     cargo build --workspace
