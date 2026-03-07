@@ -71,11 +71,24 @@ cargo run -p kardhub-app
 # Run tests
 cargo test -p kardhub-core
 
+# Format check
+cargo fmt --check
+
 # Lint
 cargo clippy --all-targets -- -D warnings
 ```
 
 On first launch, enter a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` and `read:org` scopes.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| GitHub PAT | Yes | Personal Access Token with `repo` and `read:org` scopes |
+
+The PAT is entered through the app's login screen (desktop) or the extension popup (browser). It is stored locally in `$XDG_CONFIG_HOME/kardhub/cache/settings.json` and never sent anywhere other than the GitHub API. Signing out clears all stored data.
+
+No `.env` file is needed — the app manages credentials through its own settings UI.
 
 ## Browser Extension
 
