@@ -16,7 +16,7 @@ pulldown-cmark.workspace = true
 regex.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
