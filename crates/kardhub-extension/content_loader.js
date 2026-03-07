@@ -22,6 +22,10 @@
         if (prMatch) {
             return { type: "pr", owner, repo, prNumber: parseInt(prMatch[1], 10) };
         }
+        // PR creation / compare page
+        if (location.pathname.includes("/compare/") || location.pathname.endsWith("/compare")) {
+            return { type: "compare", owner, repo };
+        }
         // Any repo sub-page is valid for the dashboard tab
         return { type: "repo", owner, repo };
     }
@@ -727,8 +731,116 @@
         injectDashboardTab(page);
         if (page.type === "pr") {
             injectIssueLinker(page);
+            injectDraftToggle(page);
             observePrState();
         }
+        if (page.type === "compare") {
+            autoSelectDraft();
+        }
+    }
+
+    // ── Auto-select draft on PR creation ─────────────────────────────────
+
+    /**
+     * On compare/new-PR pages, auto-select the "Create draft pull request"
+     * option so PRs default to draft.
+     */
+    function autoSelectDraft() {
+        // GitHub renders a dropdown with a draft radio button.
+        // The draft option has value="draft" or data-value="draft".
+        function trySelect() {
+            // Method 1: The details-menu dropdown with the draft radio.
+            const draftRadio =
+                document.querySelector('input[type="radio"][value="draft"]') ||
+                document.querySelector('input[name="draft"][value="1"]');
+            if (draftRadio && !draftRadio.checked) {
+                draftRadio.click();
+                return true;
+            }
+            // Method 2: The button with "draft" in data attributes.
+            const draftBtn = document.querySelector('[data-value="draft"]');
+            if (draftBtn) {
+                draftBtn.click();
+                return true;
+            }
+            return false;
+        }
+
+        // Try immediately, then observe for dynamic loading.
+        if (trySelect()) return;
+
+        const obs = new MutationObserver(() => {
+            if (trySelect()) {
+                obs.disconnect();
+            }
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+        // Stop trying after 10 seconds.
+        setTimeout(() => obs.disconnect(), 10000);
+    }
+
+    // ── Draft toggle on PR pages ─────────────────────────────────────────
+
+    /**
+     * Inject a draft toggle button near the PR title area.
+     * Allows quick switching between draft and ready-for-review.
+     */
+    function injectDraftToggle(page) {
+        if (document.getElementById("kardhub-draft-toggle")) return;
+
+        // Detect current draft status from the page.
+        const isDraft = !!(
+            document.querySelector('.State--draft') ||
+            document.querySelector('[title="Status: Draft"]') ||
+            document.querySelector('.octicon-git-pull-request-draft')
+        );
+
+        // Find the PR header actions area.
+        const headerActions =
+            document.querySelector(".gh-header-actions") ||
+            document.querySelector(".gh-header-meta");
+        if (!headerActions) return;
+
+        const btn = document.createElement("button");
+        btn.id = "kardhub-draft-toggle";
+        btn.className = "kardhub-draft-btn";
+        btn.title = isDraft ? "Mark ready for review" : "Convert to draft";
+        btn.textContent = isDraft ? "🟡 Draft → Ready" : "📋 Ready → Draft";
+
+        let currentDraft = isDraft;
+
+        btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            btn.textContent = "⏳ Updating…";
+            try {
+                const newDraft = !currentDraft;
+                await bgMessage({
+                    type: "toggleDraft",
+                    owner: page.owner,
+                    repo: page.repo,
+                    prNumber: page.prNumber,
+                    draft: newDraft,
+                });
+                currentDraft = newDraft;
+                btn.title = newDraft ? "Mark ready for review" : "Convert to draft";
+                btn.textContent = newDraft ? "🟡 Draft → Ready" : "📋 Ready → Draft";
+                // Preserve dashboard state so the board reopens with remapped columns.
+                if (dashboardOpen && location.hash !== "#kardhub") {
+                    history.replaceState(null, "", `${location.pathname}${location.search}#kardhub`);
+                }
+                // Reload to update GitHub's own UI and re-fetch board data.
+                location.reload();
+            } catch (err) {
+                btn.textContent = `❌ ${err.message}`;
+                setTimeout(() => {
+                    btn.textContent = currentDraft ? "🟡 Draft → Ready" : "📋 Ready → Draft";
+                }, 3000);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        headerActions.prepend(btn);
     }
 
     // ── PR close/merge observer ─────────────────────────────────────────

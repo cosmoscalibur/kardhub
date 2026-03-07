@@ -465,6 +465,33 @@ body[data-kardhub-open] .footer {
     box-sizing: border-box;
 }
 
+/* ── Draft toggle button ─────────────────────────────────────────── */
+
+.kardhub-draft-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid rgba(240, 246, 252, 0.1);
+    border-radius: 6px;
+    background: #21262d;
+    color: #c9d1d9;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-right: 8px;
+}
+
+.kardhub-draft-btn:hover {
+    background: #30363d;
+}
+
+.kardhub-draft-btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 .kardhub-linker-header {
     display: flex;
     align-items: center;

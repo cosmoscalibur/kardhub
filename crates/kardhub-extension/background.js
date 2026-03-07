@@ -90,6 +90,34 @@ async function apiDelete(path, token) {
 }
 
 /**
+ * Make an authenticated GraphQL request to the GitHub API.
+ * @param {string} token - GitHub PAT
+ * @param {string} query - GraphQL query/mutation string
+ * @param {object} variables - GraphQL variables
+ * @returns {Promise<object>} Parsed response data
+ */
+async function apiGraphQL(token, query, variables = {}) {
+    const resp = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+            ...HEADERS,
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
+    });
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`GitHub GraphQL ${resp.status}: ${text}`);
+    }
+    const json = await resp.json();
+    if (json.errors && json.errors.length > 0) {
+        throw new Error(`GraphQL error: ${json.errors[0].message}`);
+    }
+    return json.data;
+}
+
+/**
  * Paginate a GitHub API endpoint collecting all pages.
  * @param {string} path - API path with query params
  * @param {string} token - GitHub PAT
@@ -239,6 +267,39 @@ async function handleMessage(msg) {
                 token
             );
             return { deleted: true };
+        }
+
+        case "toggleDraft": {
+            if (!token) throw new Error("No token configured");
+            const { owner, repo, prNumber, draft } = msg;
+            // Fetch the PR's GraphQL node ID.
+            const pr = await apiGet(
+                `/repos/${owner}/${repo}/pulls/${prNumber}`,
+                token
+            );
+            const nodeId = pr.node_id;
+            if (!nodeId) throw new Error("Could not resolve PR node ID");
+
+            if (draft) {
+                // Convert to draft.
+                await apiGraphQL(token, `
+                    mutation($id: ID!) {
+                        convertPullRequestToDraft(input: { pullRequestId: $id }) {
+                            pullRequest { isDraft }
+                        }
+                    }
+                `, { id: nodeId });
+            } else {
+                // Mark ready for review.
+                await apiGraphQL(token, `
+                    mutation($id: ID!) {
+                        markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                            pullRequest { isDraft }
+                        }
+                    }
+                `, { id: nodeId });
+            }
+            return { draft };
         }
 
         default:
