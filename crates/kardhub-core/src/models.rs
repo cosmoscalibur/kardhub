@@ -193,6 +193,17 @@ pub struct Organization {
     pub is_main: bool,
 }
 
+/// A GitHub issue template parsed from `.github/ISSUE_TEMPLATE/*.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueTemplate {
+    /// Template display name (from YAML frontmatter `name` field).
+    pub name: String,
+    /// Short template description (from YAML frontmatter `about` field).
+    pub about: String,
+    /// Markdown body content to pre-populate the issue description.
+    pub body: String,
+}
+
 /// Priority level parsed from `#N` labels.
 ///
 /// Lower numeric value = higher priority = shown first on the board.

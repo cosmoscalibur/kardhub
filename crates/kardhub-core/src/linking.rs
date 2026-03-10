@@ -1,8 +1,9 @@
 //! PR ↔ Issue linking engine.
 //!
-//! Parses full GitHub issue URLs and closing keywords from PR bodies,
-//! then post-processes mapped cards to embed linked PR summaries in issue
-//! cards and optionally override the issue's column with the PR's position.
+//! Parses full GitHub issue URLs, ZenHub workspace URLs, and closing
+//! keywords from PR bodies, then post-processes mapped cards to embed
+//! linked PR summaries in issue cards and optionally override the
+//! issue's column with the PR's position.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -17,6 +18,14 @@ static RE_GITHUB_URL: LazyLock<Regex> = LazyLock::new(|| {
         r"(?mi)https?://github\.com/(?P<owner>[a-zA-Z0-9_.-]+)/(?P<repo>[a-zA-Z0-9_.-]+)/issues/(?P<num>\d+)",
     )
     .expect("github-url regex")
+});
+
+/// ZenHub issue URL: `https://app.zenhub.com/workspaces/.../issues/gh/owner/repo/N`.
+static RE_ZENHUB_URL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?mi)https?://app\.zenhub\.com/workspaces/[^/]+/issues/gh/(?P<owner>[a-zA-Z0-9_.-]+)/(?P<repo>[a-zA-Z0-9_.-]+)/(?P<num>\d+)",
+    )
+    .expect("zenhub-url regex")
 });
 
 /// GitHub closing keywords with cross-repo reference: `Closes owner/repo#N`.
@@ -52,6 +61,7 @@ pub struct IssueRef {
 ///
 /// Recognises:
 /// - `https://github.com/owner/repo/issues/N` (full GitHub issue URL)
+/// - `https://app.zenhub.com/workspaces/.../issues/gh/owner/repo/N` (ZenHub)
 /// - `Closes owner/repo#N`, `Fixes owner/repo#N`, `Resolves owner/repo#N`
 /// - `Closes #N`, `Fixes #N`, `Resolves #N` (same-repo, uses defaults)
 ///
@@ -73,6 +83,15 @@ pub fn parse_issue_refs(body: &str, default_owner: &str, default_repo: &str) -> 
     };
 
     for caps in RE_GITHUB_URL.captures_iter(body) {
+        if let (Some(o), Some(r), Some(n)) =
+            (caps.name("owner"), caps.name("repo"), caps.name("num"))
+            && let Ok(num) = n.as_str().parse::<u64>()
+        {
+            push(o.as_str().to_string(), r.as_str().to_string(), num);
+        }
+    }
+
+    for caps in RE_ZENHUB_URL.captures_iter(body) {
         if let (Some(o), Some(r), Some(n)) =
             (caps.name("owner"), caps.name("repo"), caps.name("num"))
             && let Ok(num) = n.as_str().parse::<u64>()
@@ -339,6 +358,33 @@ mod tests {
         let body = "https://github.com/org/repo/issues/1\nCloses org/repo#1";
         let refs = parse_issue_refs(body, "o", "r");
         assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn parse_zenhub_url() {
+        let body = "https://app.zenhub.com/workspaces/my-space-1234/issues/gh/org/repo/42";
+        let refs = parse_issue_refs(body, "o", "r");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].owner, "org");
+        assert_eq!(refs[0].repo, "repo");
+        assert_eq!(refs[0].number, 42);
+    }
+
+    #[test]
+    fn parse_zenhub_deduplicates_with_github() {
+        let body = "https://github.com/org/repo/issues/42\nhttps://app.zenhub.com/workspaces/ws-1/issues/gh/org/repo/42";
+        let refs = parse_issue_refs(body, "o", "r");
+        assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn parse_zenhub_url_real_workspace() {
+        let body = "https://app.zenhub.com/workspaces/tributi-5b8051ddf4bfb679f84e2add/issues/gh/tributi-co/gira/4841";
+        let refs = parse_issue_refs(body, "x", "y");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].owner, "tributi-co");
+        assert_eq!(refs[0].repo, "gira");
+        assert_eq!(refs[0].number, 4841);
     }
 
     // ── link_cards ───────────────────────────────────────────────────

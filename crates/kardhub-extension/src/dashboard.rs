@@ -6,6 +6,7 @@
 
 use dioxus::prelude::*;
 
+use kardhub_core::filtering::{BoardFilter, matches_filter};
 use kardhub_core::mapping::{MappingConfig, map_card};
 use kardhub_core::models::{
     Card, CardSource, CiStatus, Column, Issue, IssueState, Label, PullRequest,
@@ -32,6 +33,9 @@ pub fn Dashboard(props: DashboardProps) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| Option::<String>::None);
     let mut refresh_count = use_signal(|| 0u32);
+    let mut filter_assignee = use_signal(String::new);
+    let mut filter_text = use_signal(String::new);
+    let mut filter_number = use_signal(String::new);
 
     let owner = props.owner.clone();
     let repo = props.repo.clone();
@@ -94,6 +98,27 @@ pub fn Dashboard(props: DashboardProps) -> Element {
         };
     }
 
+    // Build active filter from current signal values.
+    let board_filter = BoardFilter {
+        assignee: {
+            let v = filter_assignee();
+            if v.is_empty() { None } else { Some(v) }
+        },
+        text: {
+            let v = filter_text();
+            if v.is_empty() { None } else { Some(v) }
+        },
+        number: {
+            let v = filter_number();
+            let v = v.trim_start_matches('#');
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        },
+    };
+
     rsx! {
         div { class: "kardhub-board",
             div { class: "kardhub-board-actions",
@@ -106,11 +131,35 @@ pub fn Dashboard(props: DashboardProps) -> Element {
                     "⟳"
                 }
             }
+            // Filter bar
+            div { class: "kardhub-filter-bar",
+                input {
+                    class: "kardhub-filter-input",
+                    r#type: "text",
+                    placeholder: "Filter by assignee…",
+                    value: "{filter_assignee}",
+                    oninput: move |e| filter_assignee.set(e.value()),
+                }
+                input {
+                    class: "kardhub-filter-input kardhub-filter-input-wide",
+                    r#type: "text",
+                    placeholder: "Search title or body…",
+                    value: "{filter_text}",
+                    oninput: move |e| filter_text.set(e.value()),
+                }
+                input {
+                    class: "kardhub-filter-input kardhub-filter-input-narrow",
+                    r#type: "text",
+                    placeholder: "#123",
+                    value: "{filter_number}",
+                    oninput: move |e| filter_number.set(e.value()),
+                }
+            }
             for col in columns.iter() {
                 {
                     let col_cards: Vec<&Card> = all_cards
                         .iter()
-                        .filter(|c| !c.hidden && c.column.name == col.name && c.column.emoji == col.emoji)
+                        .filter(|c| !c.hidden && c.column.name == col.name && c.column.emoji == col.emoji && matches_filter(c, &board_filter))
                         .collect();
                     rsx! {
                         BoardColumn {

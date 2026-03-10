@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::models::{
-    AuthenticatedUser, CiStatus, Comment, Issue, IssueState, Label, Organization, PullRequest,
-    Repository, Review, ReviewState, User,
+    AuthenticatedUser, CiStatus, Comment, Issue, IssueState, IssueTemplate, Label, Organization,
+    PullRequest, Repository, Review, ReviewState, User,
 };
 
 /// Errors that may occur when interacting with the GitHub API.
@@ -123,6 +123,15 @@ fn exclude_archived(repos: Vec<GhRepo>) -> Vec<Repository> {
 struct GhLabel {
     name: String,
     color: String,
+}
+
+/// GitHub repo content entry (directory listing item).
+#[derive(Debug, Deserialize)]
+struct GhContentEntry {
+    name: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    download_url: Option<String>,
 }
 
 impl From<GhLabel> for Label {
@@ -790,6 +799,93 @@ impl RestClient {
             .paginate(&format!("/repos/{owner}/{repo}/labels"))
             .await?;
         Ok(labels.into_iter().map(Into::into).collect())
+    }
+
+    /// List issue templates from `.github/ISSUE_TEMPLATE/*.md`.
+    ///
+    /// Returns an empty vector when the directory does not exist (404)
+    /// or contains no markdown files.
+    pub async fn list_issue_templates(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<IssueTemplate>, GitHubError> {
+        let entries_resp = self
+            .get(&format!(
+                "/repos/{owner}/{repo}/contents/.github/ISSUE_TEMPLATE"
+            ))
+            .send()
+            .await
+            .map_err(|e| GitHubError::Http(e.to_string()))?;
+
+        if entries_resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+
+        let entries: Vec<GhContentEntry> = self.handle_response(entries_resp).await?;
+
+        let mut templates = Vec::new();
+        for entry in entries {
+            if entry.entry_type != "file" || !entry.name.ends_with(".md") {
+                continue;
+            }
+            // Fetch raw file content via download_url.
+            let url = match &entry.download_url {
+                Some(u) => u.clone(),
+                None => continue,
+            };
+            let raw = reqwest::get(&url).await.ok().and_then(|r| {
+                if r.status().is_success() {
+                    Some(r)
+                } else {
+                    None
+                }
+            });
+            let content = match raw {
+                Some(r) => r.text().await.unwrap_or_default(),
+                None => continue,
+            };
+            if let Some(tpl) = Self::parse_issue_template(&content) {
+                templates.push(tpl);
+            }
+        }
+        Ok(templates)
+    }
+
+    /// Parse a markdown issue template with YAML frontmatter.
+    ///
+    /// Expected format:
+    /// ```text
+    /// ---
+    /// name: Bug report
+    /// about: File a bug report
+    /// ---
+    /// Markdown body here…
+    /// ```
+    fn parse_issue_template(content: &str) -> Option<IssueTemplate> {
+        let trimmed = content.trim();
+        if !trimmed.starts_with("---") {
+            return None;
+        }
+        let after_first = &trimmed[3..];
+        let end = after_first.find("---")?;
+        let frontmatter = &after_first[..end];
+        let body = after_first[end + 3..].trim().to_string();
+
+        let mut name = String::new();
+        let mut about = String::new();
+        for line in frontmatter.lines() {
+            let line = line.trim();
+            if let Some(val) = line.strip_prefix("name:") {
+                name = val.trim().trim_matches('"').trim_matches('\'').to_string();
+            } else if let Some(val) = line.strip_prefix("about:") {
+                about = val.trim().trim_matches('"').trim_matches('\'').to_string();
+            }
+        }
+        if name.is_empty() {
+            return None;
+        }
+        Some(IssueTemplate { name, about, body })
     }
 
     /// Create an issue in a repository.
@@ -1628,5 +1724,26 @@ mod tests {
             update.assignees.as_ref().unwrap(),
             &vec!["octocat".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_issue_template_valid() {
+        let content = "---\nname: Bug report\nabout: File a bug report\n---\n## Steps to reproduce\n\n1. Step one\n";
+        let tpl = RestClient::parse_issue_template(content).unwrap();
+        assert_eq!(tpl.name, "Bug report");
+        assert_eq!(tpl.about, "File a bug report");
+        assert!(tpl.body.contains("Steps to reproduce"));
+    }
+
+    #[test]
+    fn parse_issue_template_missing_name() {
+        let content = "---\nabout: Some description\n---\nBody here\n";
+        assert!(RestClient::parse_issue_template(content).is_none());
+    }
+
+    #[test]
+    fn parse_issue_template_no_frontmatter() {
+        let content = "Just a plain markdown file.";
+        assert!(RestClient::parse_issue_template(content).is_none());
     }
 }

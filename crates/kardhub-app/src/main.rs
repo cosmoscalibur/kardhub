@@ -8,12 +8,12 @@ mod components;
 
 use cache::{
     AppSettings, OrgSources, SourceMap, SourceRepos, cached_card_count, clear_all_cache,
-    closed_sync_time, is_cards_fresh, is_labels_fresh, is_members_fresh, is_profile_fresh,
-    is_source_map_fresh, load_cards, load_closed_issues, load_labels, load_members,
-    load_merged_prs, load_open_issues, load_profile, load_prs, load_settings, load_source_map,
-    merged_sync_time, open_sync_time, prs_sync_time, save_cards, save_closed_issues, save_labels,
-    save_members, save_merged_prs, save_open_issues, save_profile, save_prs, save_settings,
-    save_source_map, source_key,
+    clear_repo_open_cache, closed_sync_time, is_cards_fresh, is_labels_fresh, is_members_fresh,
+    is_profile_fresh, is_source_map_fresh, load_cards, load_closed_issues, load_labels,
+    load_members, load_merged_prs, load_open_issues, load_profile, load_prs, load_settings,
+    load_source_map, merged_sync_time, open_sync_time, prs_sync_time, save_cards,
+    save_closed_issues, save_labels, save_members, save_merged_prs, save_open_issues, save_profile,
+    save_prs, save_settings, save_source_map, source_key,
 };
 use components::board::Board;
 use components::create_issue::CreateIssue;
@@ -24,7 +24,7 @@ use components::sidebar::{PersonalFilter, RepoEntry, Sidebar, SourceKind};
 use dioxus::prelude::*;
 use kardhub_core::github::RestClient;
 use kardhub_core::mapping::{MappingConfig, map_card};
-use kardhub_core::models::{AuthenticatedUser, Card, CardSource, Label, User};
+use kardhub_core::models::{AuthenticatedUser, Card, CardSource, IssueTemplate, Label, User};
 
 /// Application-wide state.
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +98,7 @@ fn app() -> Element {
     let mut selected_card = use_signal(|| Option::<Card>::None);
     let mut show_settings = use_signal(|| false);
     let mut show_create_issue = use_signal(|| false);
+    let mut issue_templates: Signal<Vec<IssueTemplate>> = use_signal(Vec::new);
     let mut app_settings = use_signal(load_settings);
     let mut personal_filter = use_signal(PersonalFilter::default);
 
@@ -627,6 +628,7 @@ fn app() -> Element {
                                         let mut all_cards = Vec::new();
                                         for &idx in &selected {
                                             if let Some(repo_name) = repos.get(idx) {
+                                                clear_repo_open_cache(&owner, repo_name);
                                                 let cards = fetch_cards(
                                                     &token, &owner, repo_name,
                                                 )
@@ -638,6 +640,7 @@ fn app() -> Element {
                                         all_cards.sort_by(|a, b| {
                                             a.priority.cmp(&b.priority)
                                         });
+                                        link_and_hide_prs(&mut all_cards);
                                         if let AppState::Dashboard {
                                             cards: ref mut c, ..
                                         } = *state.write()
@@ -651,8 +654,29 @@ fn app() -> Element {
                             on_card_click: move |card: Card| {
                                 selected_card.set(Some(card));
                             },
-                            on_create: move |_| {
-                                show_create_issue.set(true);
+                            on_create: {
+                                let token_tpl = token.clone();
+                                let owner_tpl = owner.clone();
+                                let repos_for_tpl = repos.clone();
+                                let selected_for_tpl = selected_repos.clone();
+                                move |_| {
+                                    show_create_issue.set(true);
+                                    // Fetch issue templates for the first selected repo.
+                                    let token = token_tpl.clone();
+                                    let owner = owner_tpl.clone();
+                                    let repo = selected_for_tpl
+                                        .first()
+                                        .and_then(|&i| repos_for_tpl.get(i).cloned())
+                                        .unwrap_or_default();
+                                    spawn(async move {
+                                        let client = RestClient::new(token);
+                                        let tpls = client
+                                            .list_issue_templates(&owner, &repo)
+                                            .await
+                                            .unwrap_or_default();
+                                        issue_templates.set(tpls);
+                                    });
+                                }
                             },
                             members: members_full.clone(),
                         }
@@ -759,6 +783,7 @@ fn app() -> Element {
                                         members: members_logins,
                                         cards: cards_ac,
                                         repo_labels: repo_labels.clone(),
+                                        templates: issue_templates(),
                                         user_login: user.login.clone(),
                                         on_close: move |_| {
                                             show_create_issue.set(false);
@@ -783,6 +808,7 @@ fn app() -> Element {
                                                     }
                                                 }
                                                 all_cards.sort_by(|a, b| a.priority.cmp(&b.priority));
+                                                link_and_hide_prs(&mut all_cards);
                                                 if let AppState::Dashboard { cards: ref mut c, .. } = *state.write() {
                                                     *c = all_cards;
                                                 }

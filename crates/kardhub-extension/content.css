@@ -177,6 +177,45 @@ body[data-kardhub-open] .footer {
     border-color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
 }
 
+/* ── Filter bar ──────────────────────────────────────────────────────── */
+
+.kardhub-filter-bar {
+    display: flex;
+    gap: 8px;
+    padding: 0 12px 8px;
+    flex-shrink: 0;
+}
+
+.kardhub-filter-input {
+    flex: 1;
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid var(--borderColor-default, var(--color-border-default, #30363d));
+    border-radius: 6px;
+    background: var(--bgColor-default, var(--color-canvas-default, #0d1117));
+    color: var(--fgColor-default, var(--color-fg-default, #e6edf3));
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.kardhub-filter-input:focus {
+    border-color: var(--fgColor-accent, var(--color-accent-fg, #58a6ff));
+    box-shadow: 0 0 0 2px var(--borderColor-accent-muted, var(--color-accent-muted, #388bfd26));
+}
+
+.kardhub-filter-input::placeholder {
+    color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+}
+
+.kardhub-filter-input-wide {
+    flex: 2;
+}
+
+.kardhub-filter-input-narrow {
+    flex: 0 0 70px;
+    max-width: 70px;
+}
+
 /* ── Kanban columns ──────────────────────────────────────────────────── */
 
 .kardhub-column {

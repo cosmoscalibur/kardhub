@@ -448,3 +448,17 @@ pub fn clear_all_cache() {
         }
     }
 }
+
+/// Remove per-repo caches that feed incremental sync (open issues,
+/// open PRs, and derived cards). Deleting these files forces a full
+/// re-fetch on the next `fetch_cards` call, preventing issues from
+/// being permanently missed by stale `since` timestamps.
+pub fn clear_repo_open_cache(owner: &str, repo: &str) {
+    let key_o = source_key(owner);
+    let key_r = source_key(repo);
+    let dir = cache_dir();
+    for prefix in ["open_", "cards_", "prs_"] {
+        let path = dir.join(format!("{prefix}{key_o}_{key_r}.json"));
+        let _ = fs::remove_file(path);
+    }
+}
