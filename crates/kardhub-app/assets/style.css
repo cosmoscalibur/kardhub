@@ -1,7 +1,6 @@
 /* KardHub — Design System
  *
- * Dark-first theme with CSS custom properties.
- * Toggle .light on <body> for light mode.
+ * Dark theme with CSS custom properties.
  */
 
 /* ── Fonts ─────────────────────────────────────────────────────────── */
@@ -46,37 +45,6 @@
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-}
-
-/* ── Light Theme ───────────────────────────────────────────────────── */
-.light {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f6f8fa;
-  --bg-tertiary: #eaeef2;
-  --bg-card: #ffffff;
-  --bg-hover: #f0f2f5;
-  --bg-active: #d8dee4;
-
-  --text-primary: #1f2328;
-  --text-secondary: #656d76;
-  --text-muted: #8b949e;
-
-  --border-default: #d0d7de;
-  --border-subtle: #d8dee4;
-
-  --accent: #0969da;
-  --accent-hover: #0550ae;
-  --accent-muted: #ddf4ff;
-
-  --success: #1a7f37;
-  --warning: #9a6700;
-  --danger: #cf222e;
-
-  --column-bg: #f0f2f5;
-  --card-shadow: 0 1px 3px rgba(31, 35, 40, 0.1);
-
   color: var(--text-primary);
   background: var(--bg-primary);
 }
@@ -348,10 +316,6 @@ select {
   background-position: right 8px center;
 }
 
-.light .source-org-select {
-  color-scheme: light;
-}
-
 .source-org-select:focus {
   border-color: var(--accent);
 }
@@ -360,23 +324,6 @@ select {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   padding: 4px 8px;
-}
-
-.theme-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-secondary);
-  width: 100%;
-  text-align: left;
-  transition: background var(--transition);
-}
-
-.theme-toggle:hover {
-  background: var(--bg-hover);
 }
 
 /* ── Main Content ──────────────────────────────────────────────────── */

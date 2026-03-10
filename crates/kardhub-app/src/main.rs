@@ -91,7 +91,7 @@ fn build_repo_entries(repos: &[String], owner: &str) -> Vec<RepoEntry> {
 /// Root application component.
 fn app() -> Element {
     let mut state = use_signal(|| AppState::Login);
-    let mut dark_mode = use_signal(|| true);
+
     let mut sidebar_collapsed = use_signal(|| false);
     let mut login_error = use_signal(|| Option::<String>::None);
     let board_loading = use_signal(|| false);
@@ -172,12 +172,12 @@ fn app() -> Element {
         }
     }
 
-    let body_class = if dark_mode() { "" } else { "light" };
+
 
     match state() {
         AppState::Login => {
             rsx! {
-                div { class: "{body_class}",
+                div {
                     style { { include_str!("../assets/style.css") } }
                     LoginScreen {
                         on_submit: move |token: String| {
@@ -212,7 +212,7 @@ fn app() -> Element {
         }
         AppState::Loading => {
             rsx! {
-                div { class: "{body_class}",
+                div {
                     style { { include_str!("../assets/style.css") } }
                     div { class: "login-screen",
                         div { class: "loading",
@@ -322,7 +322,7 @@ fn app() -> Element {
             let selected_for_rc = selected_repos.clone();
 
             rsx! {
-                div { class: "{body_class}",
+                div {
                     style { { include_str!("../assets/style.css") } }
                     div { class: "kardhub-app",
                         Sidebar {
@@ -330,7 +330,7 @@ fn app() -> Element {
                             user_name: user.name.clone().unwrap_or_else(|| user.login.clone()),
                             user_login: user.login.clone(),
                             avatar_url: user.avatar_url.clone(),
-                            dark_mode: dark_mode(),
+
                             orgs: orgs.clone(),
                             source: source.clone(),
                             repos: repo_entries,
@@ -596,9 +596,7 @@ fn app() -> Element {
                             on_toggle: move |_| {
                                 sidebar_collapsed.set(!sidebar_collapsed());
                             },
-                            on_toggle_theme: move |_| {
-                                dark_mode.set(!dark_mode());
-                            },
+
                             on_settings: move |_| {
                                 show_settings.set(!show_settings());
                             },

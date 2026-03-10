@@ -36,7 +36,7 @@ Dioxus 0.7 desktop application providing:
 - Card detail panel (slide-open) with full metadata.
 - Settings panel for default repos, cache status, and manual refresh.
 - Local JSON cache under `$XDG_CONFIG_HOME/kardhub/cache/`.
-- Dark and light theme toggle.
+- Dark theme.
 
 ### kardhub-extension
 

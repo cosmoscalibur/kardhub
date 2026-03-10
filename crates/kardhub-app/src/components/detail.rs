@@ -146,8 +146,6 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
     let mut editing_title = use_signal(|| false);
     let mut title_draft = use_signal(|| title.to_string());
     let mut saving_title = use_signal(|| false);
-    let mut editing_priority = use_signal(|| false);
-    let mut priority_draft: Signal<u8> = use_signal(|| card.priority.map_or(1, |p| p.0));
     let mut saving_priority = use_signal(|| false);
     let mut editing_labels = use_signal(|| false);
     let mut selected_labels: Signal<Vec<String>> = use_signal(|| {
@@ -381,78 +379,72 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                 // Priority (editable, issues only)
                 if !is_pr {
                     div { class: "detail-section",
-                        div { class: "detail-section-header",
-                            div { class: "detail-section-title", "Priority" }
-                            if is_open && !editing_priority() {
-                                button {
-                                    class: "detail-edit-btn",
-                                    onclick: move |_| editing_priority.set(true),
-                                    "✏️"
-                                }
-                            }
-                        }
-                        if editing_priority() {
+                        div { class: "detail-section-title", "Priority" }
+                        if is_open {
                             div { class: "priority-select",
-                                select {
-                                    value: "{priority_draft}",
-                                    onchange: move |e| {
-                                        if let Ok(v) = e.value().parse::<u8>() {
-                                            priority_draft.set(v);
-                                        }
-                                    },
-                                    for i in 1u8..=6 {
-                                        option { value: "{i}", selected: priority_draft() == i, "#{i}" }
-                                    }
-                                }
-                            }
-                            div { class: "detail-edit-actions",
-                                button {
-                                    class: "modal-btn modal-btn-secondary",
-                                    onclick: move |_| editing_priority.set(false),
-                                    "Cancel"
-                                }
-                                button {
-                                    class: "modal-btn modal-btn-primary",
-                                    disabled: saving_priority(),
-                                    onclick: {
+                                for n in 1u8..=6 {
+                                    {
+                                        let current = card.priority.map(|p| p.0);
+                                        let is_active = current == Some(n);
+                                        let cls = if is_active { "priority-btn active" } else { "priority-btn" };
                                         let token = token.clone();
                                         let owner = owner.clone();
                                         let repo = repo.clone();
                                         let priority_label_names = priority_label_names.clone();
-                                        move |_| {
-                                            let token = token.clone();
-                                            let owner = owner.clone();
-                                            let repo = repo.clone();
-                                            let new_priority = priority_draft();
-                                            let new_priority_label = format!("#{new_priority}");
-                                            // Build updated label list: remove old priority, add new.
-                                            let mut all_labels: Vec<String> = selected_labels()
-                                                .into_iter()
-                                                .chain(std::iter::once(new_priority_label))
-                                                .collect();
-                                            // Remove any old priority labels that aren't the new one.
-                                            for old in &priority_label_names {
-                                                all_labels.retain(|l| l != old);
+                                        let on_synced = props.on_synced;
+                                        rsx! {
+                                            button {
+                                                class: "{cls}",
+                                                disabled: saving_priority(),
+                                                onclick: move |_| {
+                                                    let token = token.clone();
+                                                    let owner = owner.clone();
+                                                    let repo = repo.clone();
+                                                    let priority_label_names = priority_label_names.clone();
+                                                    let new_priority_label = format!("#{n}");
+                                                    // Build updated label list: non-priority + new priority.
+                                                    let mut all_labels: Vec<String> = selected_labels()
+                                                        .into_iter()
+                                                        .chain(std::iter::once(new_priority_label))
+                                                        .collect();
+                                                    // Remove any old priority labels.
+                                                    for old in &priority_label_names {
+                                                        all_labels.retain(|l| l != old);
+                                                    }
+                                                    // Re-add the new priority.
+                                                    all_labels.push(format!("#{n}"));
+                                                    all_labels.dedup();
+                                                    spawn(async move {
+                                                        saving_priority.set(true);
+                                                        let client = RestClient::new(token.clone());
+                                                        let update = kardhub_core::github::IssueUpdate {
+                                                            labels: Some(all_labels),
+                                                            ..Default::default()
+                                                        };
+                                                        if client.update_issue(&owner, &repo, number, &update).await.is_ok() {
+                                                            // Re-fetch fresh issue and re-sync card + column.
+                                                            let config = kardhub_core::mapping::MappingConfig::default();
+                                                            if let Ok(fresh_issue) = client.get_issue(&owner, &repo, number).await {
+                                                                let fresh_card = kardhub_core::mapping::map_card(
+                                                                    &owner,
+                                                                    &repo,
+                                                                    CardSource::Issue(fresh_issue),
+                                                                    &config,
+                                                                );
+                                                                on_synced.call(fresh_card);
+                                                            }
+                                                        }
+                                                        saving_priority.set(false);
+                                                    });
+                                                },
+                                                "#{n}"
                                             }
-                                            // Re-add the new priority.
-                                            all_labels.push(format!("#{new_priority}"));
-                                            all_labels.dedup();
-                                            spawn(async move {
-                                                saving_priority.set(true);
-                                                let client = RestClient::new(token);
-                                                let update = kardhub_core::github::IssueUpdate {
-                                                    labels: Some(all_labels),
-                                                    ..Default::default()
-                                                };
-                                                if client.update_issue(&owner, &repo, number, &update).await.is_ok() {
-                                                    editing_priority.set(false);
-                                                }
-                                                saving_priority.set(false);
-                                            });
                                         }
-                                    },
-                                    if saving_priority() { "Saving…" } else { "Save" }
+                                    }
                                 }
+                            }
+                            if saving_priority() {
+                                span { class: "detail-saving-hint", "Saving…" }
                             }
                         } else if let Some(priority) = &card.priority {
                             span { class: "card-priority", "#{priority.0}" }
@@ -796,7 +788,7 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                                                         span { class: "detail-comment-time",
                                                             "{relative_time(&comment.created_at)}"
                                                         }
-                                                        if is_own && is_open && !is_editing {
+                                                        if is_own && !is_editing {
                                                             button {
                                                                 class: "detail-edit-btn",
                                                                 onclick: move |_| {
@@ -865,99 +857,97 @@ pub fn CardDetail(props: CardDetailProps) -> Element {
                         }
 
                         // Add new comment
-                        if is_open {
-                            div { class: "detail-new-comment",
-                                MarkdownEditor {
-                                    value: new_comment_text(),
-                                    placeholder: "Add a comment…",
-                                    owner: owner.clone(),
-                                    repo: repo.clone(),
-                                    members: members_ac.clone(),
-                                    cards: cards_ac.clone(),
-                                    on_change: move |v: String| new_comment_text.set(v),
-                                }
-                                div { class: "detail-edit-actions",
-                                    button {
-                                        class: "modal-btn modal-btn-primary",
-                                        disabled: new_comment_text().trim().is_empty() || saving_comment(),
-                                        onclick: move |_| {
-                                            let token = token_add.clone();
-                                            let owner = owner_add.clone();
-                                            let repo = repo_add.clone();
-                                            let text = new_comment_text().trim().to_string();
-                                            let mut comments = comments;
-                                            spawn(async move {
-                                                saving_comment.set(true);
-                                                let client = RestClient::new(token);
-                                                if let Ok(new_c) = client.add_comment(&owner, &repo, number, &text).await {
-                                                    if let Some(ref mut list) = *comments.write() {
-                                                        list.push(new_c);
-                                                    }
-                                                    new_comment_text.set(String::new());
+                        div { class: "detail-new-comment",
+                            MarkdownEditor {
+                                value: new_comment_text(),
+                                placeholder: "Add a comment…",
+                                owner: owner.clone(),
+                                repo: repo.clone(),
+                                members: members_ac.clone(),
+                                cards: cards_ac.clone(),
+                                on_change: move |v: String| new_comment_text.set(v),
+                            }
+                            div { class: "detail-edit-actions",
+                                button {
+                                    class: "modal-btn modal-btn-primary",
+                                    disabled: new_comment_text().trim().is_empty() || saving_comment(),
+                                    onclick: move |_| {
+                                        let token = token_add.clone();
+                                        let owner = owner_add.clone();
+                                        let repo = repo_add.clone();
+                                        let text = new_comment_text().trim().to_string();
+                                        let mut comments = comments;
+                                        spawn(async move {
+                                            saving_comment.set(true);
+                                            let client = RestClient::new(token);
+                                            if let Ok(new_c) = client.add_comment(&owner, &repo, number, &text).await {
+                                                if let Some(ref mut list) = *comments.write() {
+                                                    list.push(new_c);
                                                 }
-                                                saving_comment.set(false);
-                                            });
-                                        },
-                                        if saving_comment() { "Adding…" } else { "Comment" }
-                                    }
-                                    // "Close with comment" button
-                                    {
-                                        let token_close = token.clone();
-                                        let owner_close = owner.clone();
-                                        let repo_close = repo.clone();
-                                        #[allow(clippy::redundant_locals)]
-                                        let is_pr_close = is_pr;
-                                        let pr_branch = match &card.source {
-                                            CardSource::PullRequest(pr) => pr.branch.clone(),
-                                            _ => String::new(),
-                                        };
-                                        let card_for_close = card.clone();
-                                        rsx! {
-                                            button {
-                                                class: "modal-btn close-with-comment-btn",
-                                                disabled: new_comment_text().trim().is_empty() || closing(),
-                                                onclick: move |_| {
-                                                    let token = token_close.clone();
-                                                    let owner = owner_close.clone();
-                                                    let repo = repo_close.clone();
-                                                    let comment = new_comment_text().trim().to_string();
-                                                    let branch = pr_branch.clone();
-                                                    let mut card_updated = card_for_close.clone();
-                                                    spawn(async move {
-                                                        closing.set(true);
-                                                        close_error.set(None);
-                                                        let client = RestClient::new(token);
-                                                        // Add closing comment.
-                                                        if let Err(e) = client.add_comment(&owner, &repo, number, &comment).await {
-                                                            close_error.set(Some(format!("Failed to add comment: {e}")));
-                                                            closing.set(false);
-                                                            return;
-                                                        }
-                                                        // Close the item.
-                                                        let close_ok = if is_pr_close {
-                                                            client.close_pr(&owner, &repo, number, &branch).await.is_ok()
-                                                        } else {
-                                                            let update = kardhub_core::github::IssueUpdate {
-                                                                state: Some(IssueState::Closed),
-                                                                ..Default::default()
-                                                            };
-                                                            client.update_issue(&owner, &repo, number, &update).await.is_ok()
-                                                        };
-                                                        closing.set(false);
-                                                        if close_ok {
-                                                            // Update local card state to closed.
-                                                            match &mut card_updated.source {
-                                                                CardSource::Issue(i) => i.state = IssueState::Closed,
-                                                                CardSource::PullRequest(pr) => pr.closed = true,
-                                                            }
-                                                            on_closed.call(card_updated);
-                                                        } else {
-                                                            close_error.set(Some("GitHub rejected the close request.".to_string()));
-                                                        }
-                                                    });
-                                                },
-                                                if closing() { "Closing…" } else { "Close with comment" }
+                                                new_comment_text.set(String::new());
                                             }
+                                            saving_comment.set(false);
+                                        });
+                                    },
+                                    if saving_comment() { "Adding…" } else { "Comment" }
+                                }
+                                // "Close with comment" button
+                                {
+                                    let token_close = token.clone();
+                                    let owner_close = owner.clone();
+                                    let repo_close = repo.clone();
+                                    #[allow(clippy::redundant_locals)]
+                                    let is_pr_close = is_pr;
+                                    let pr_branch = match &card.source {
+                                        CardSource::PullRequest(pr) => pr.branch.clone(),
+                                        _ => String::new(),
+                                    };
+                                    let card_for_close = card.clone();
+                                    rsx! {
+                                        button {
+                                            class: "modal-btn close-with-comment-btn",
+                                            disabled: new_comment_text().trim().is_empty() || closing(),
+                                            onclick: move |_| {
+                                                let token = token_close.clone();
+                                                let owner = owner_close.clone();
+                                                let repo = repo_close.clone();
+                                                let comment = new_comment_text().trim().to_string();
+                                                let branch = pr_branch.clone();
+                                                let mut card_updated = card_for_close.clone();
+                                                spawn(async move {
+                                                    closing.set(true);
+                                                    close_error.set(None);
+                                                    let client = RestClient::new(token);
+                                                    // Add closing comment.
+                                                    if let Err(e) = client.add_comment(&owner, &repo, number, &comment).await {
+                                                        close_error.set(Some(format!("Failed to add comment: {e}")));
+                                                        closing.set(false);
+                                                        return;
+                                                    }
+                                                    // Close the item.
+                                                    let close_ok = if is_pr_close {
+                                                        client.close_pr(&owner, &repo, number, &branch).await.is_ok()
+                                                    } else {
+                                                        let update = kardhub_core::github::IssueUpdate {
+                                                            state: Some(IssueState::Closed),
+                                                            ..Default::default()
+                                                        };
+                                                        client.update_issue(&owner, &repo, number, &update).await.is_ok()
+                                                    };
+                                                    closing.set(false);
+                                                    if close_ok {
+                                                        // Update local card state to closed.
+                                                        match &mut card_updated.source {
+                                                            CardSource::Issue(i) => i.state = IssueState::Closed,
+                                                            CardSource::PullRequest(pr) => pr.closed = true,
+                                                        }
+                                                        on_closed.call(card_updated);
+                                                    } else {
+                                                        close_error.set(Some("GitHub rejected the close request.".to_string()));
+                                                    }
+                                                });
+                                            },
+                                            if closing() { "Closing…" } else { "Close with comment" }
                                         }
                                     }
                                 }

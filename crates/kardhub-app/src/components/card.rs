@@ -38,6 +38,7 @@ pub struct CardItemProps {
 #[component]
 pub fn CardItem(props: CardItemProps) -> Element {
     let card = &props.card;
+    let repo = &card.repo;
     let (number, title, labels, logins) = match &card.source {
         CardSource::Issue(issue) => (
             issue.number,
@@ -104,7 +105,7 @@ pub fn CardItem(props: CardItemProps) -> Element {
 
             // Title
             div { class: "card-title",
-                span { class: "card-number", "{type_icon} #{number}" }
+                span { class: "card-number", "{type_icon} {repo}#{number}" }
                 "{title}"
             }
 
@@ -206,7 +207,7 @@ pub fn CardItem(props: CardItemProps) -> Element {
                                         }
                                     },
                                     span { class: "card-linked-pr-icon", "⤴" }
-                                    span { class: "card-linked-pr-number", "#{lp.number}" }
+                                    span { class: "card-linked-pr-number", "{lp.repo}#{lp.number}" }
                                     span { class: "card-linked-pr-title", "{lp.title}" }
                                     if !lp.assignees.is_empty() {
                                         div { class: "card-linked-pr-assignees",

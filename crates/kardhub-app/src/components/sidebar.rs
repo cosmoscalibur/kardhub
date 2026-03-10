@@ -46,8 +46,7 @@ pub struct SidebarProps {
     pub user_login: String,
     /// GitHub avatar URL.
     pub avatar_url: String,
-    /// Whether dark mode is active.
-    pub dark_mode: bool,
+
     /// Organization names the user belongs to.
     pub orgs: Vec<String>,
     /// Currently selected source kind.
@@ -62,8 +61,7 @@ pub struct SidebarProps {
     pub on_select_source: EventHandler<SourceKind>,
     /// Callback to toggle the sidebar collapsed state.
     pub on_toggle: EventHandler<()>,
-    /// Callback to toggle dark/light theme.
-    pub on_toggle_theme: EventHandler<()>,
+
     /// Callback to open settings.
     pub on_settings: EventHandler<()>,
     /// Callback to sign out.
@@ -84,8 +82,6 @@ pub fn Sidebar(props: SidebarProps) -> Element {
         "sidebar"
     };
 
-    let theme_icon = if props.dark_mode { "☀️" } else { "🌑" };
-    let theme_label = if props.dark_mode { "Light" } else { "Dark" };
     let toggle_icon = if props.collapsed { "▶" } else { "◀" };
 
     // First letter of login for avatar fallback
@@ -290,21 +286,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                 }
             }
 
-            // Footer: theme toggle + settings + sign out
             div { class: "sidebar-footer",
-                {
-                    let on_theme = props.on_toggle_theme;
-                    rsx! {
-                        button {
-                            class: "theme-toggle",
-                            onclick: move |_| on_theme.call(()),
-                            span { class: "icon", "{theme_icon}" }
-                            if !props.collapsed {
-                                "{theme_label}"
-                            }
-                        }
-                    }
-                }
                 {
                     let on_settings = props.on_settings;
                     rsx! {
